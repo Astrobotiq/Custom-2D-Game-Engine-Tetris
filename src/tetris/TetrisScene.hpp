@@ -257,7 +257,7 @@ namespace tetris {
                 renderWindow.draw(dim);
 
                 if (fontLoaded) {
-                    sf::Text pt(font, "GUC SECIMI...", 20);
+                    sf::Text pt(font, "POWER SELECTION...", 20);
                     pt.setFillColor(sf::Color(100, 255, 100));
                     pt.setStyle(sf::Text::Bold);
                     auto b = pt.getLocalBounds();
@@ -289,10 +289,10 @@ namespace tetris {
                 renderDebugMenu(renderWindow);
             }
 
-            if (gameState.paused) renderOverlay(renderWindow, "DURDURULDU", "P: devam");
+            if (gameState.paused) renderOverlay(renderWindow, "PAUSED", "P: Resume");
             if (showGameOver)
-                renderOverlay(renderWindow, "OYUN BITTI",
-                              "Skor: " + std::to_string(gameState.score) + "   R: Yeniden");
+                renderOverlay(renderWindow, "GAME OVER",
+                              "Score: " + std::to_string(gameState.score) + "   R: Restart");
         }
 
     private:
@@ -409,14 +409,14 @@ namespace tetris {
             box.setOutlineThickness(2.f);
             renderWindow.draw(box);
 
-            sf::Text t1(font, "+1 JETON", 15);
+            sf::Text t1(font, "+1 TOKEN", 15);
             t1.setFillColor(sf::Color(255, 220, 50, a));
             t1.setStyle(sf::Text::Bold);
             auto b1 = t1.getLocalBounds();
             t1.setPosition({bx + (bw - b1.size.x) * 0.5f, by + 4.f});
             renderWindow.draw(t1);
 
-            sf::Text t2(font, "1000 puan esigi!", 11);
+            sf::Text t2(font, "1000 point milestone!", 11);
             t2.setFillColor(sf::Color(200, 170, 255, a));
             auto b2 = t2.getLocalBounds();
             t2.setPosition({bx + (bw - b2.size.x) * 0.5f, by + 24.f});
@@ -434,12 +434,12 @@ namespace tetris {
 
             if (!fontLoaded) return;
 
-            txt(renderWindow, "GUCLER", {6.f, BOARD_Y + 8.f}, 13, sf::Color(180, 180, 255));
+            txt(renderWindow, "POWERS", {6.f, BOARD_Y + 8.f}, 13, sf::Color(180, 180, 255));
 
             auto &powers = gameState.slotMachine.powers;
 
             if (powers.empty()) {
-                txt(renderWindow, "(bos)", {10.f, BOARD_Y + 30.f}, 11, sf::Color(80, 80, 100));
+                txt(renderWindow, "(empty)", {10.f, BOARD_Y + 30.f}, 11, sf::Color(80, 80, 100));
             }
 
             for (int i = 0; i < static_cast<int>(powers.size()); ++i) {
@@ -457,7 +457,7 @@ namespace tetris {
 
                 txt(renderWindow, powers[i].name(), {8.f, y + 4.f}, 10, sf::Color(c.r, c.g, c.b, 220));
                 if (powerSelectMode)
-                    txt(renderWindow, "tikla!", {8.f, y + 20.f}, 9, sf::Color(200, 200, 100));
+                    txt(renderWindow, "click!", {8.f, y + 20.f}, 9, sf::Color(200, 200, 100));
             }
 
             if (!powers.empty()) {
@@ -470,7 +470,7 @@ namespace tetris {
                 toggleBtn.setOutlineColor(sf::Color(100, 200, 100, 200));
                 toggleBtn.setOutlineThickness(1.5f);
                 renderWindow.draw(toggleBtn);
-                txt(renderWindow, powerSelectMode ? "IPTAL" : "GUC KULLAN",
+                txt(renderWindow, powerSelectMode ? "CANCEL" : "USE POWER",
                     {8.f, btnY + 7.f}, 11, sf::Color::White);
             }
         }
@@ -597,7 +597,7 @@ namespace tetris {
             overlay.setOutlineThickness(1.5f);
             renderWindow.draw(overlay);
 
-            sf::Text hint(font, "Dusen parcayi koymak istedigin kolona tikla!", 12);
+            sf::Text hint(font, "Click the column where you want to drop the piece!", 12);
             hint.setFillColor(sf::Color(220, 180, 255));
             auto b = hint.getLocalBounds();
             hint.setPosition(sf::Vector2f{
@@ -626,7 +626,7 @@ namespace tetris {
 
             if (!fontLoaded) return;
 
-            std::string comboText = (lastSlotResult.comboCount >= 3) ? "3x KOMBO!" : "2x KOMBO!";
+            std::string comboText = (lastSlotResult.comboCount >= 3) ? "3x COMBO!" : "2x COMBO!";
             PowerSlot tempSlot;
             tempSlot.type = lastSlotResult.power;
 
@@ -780,21 +780,21 @@ namespace tetris {
 
             if (!fontLoaded) return;
 
-            txt(renderWindow, "SONRAKI", {px + 8, py + 8}, 13, {160, 160, 220});
+            txt(renderWindow, "NEXT", {px + 8, py + 8}, 13, {160, 160, 220});
             for (int i = 0; i < 3; ++i)
                 drawMiniPiece(renderWindow, gameState.nextPieces[i],
                               {px + 12, py + 28.f + i * 60}, 16);
 
             float iy = py + 220;
-            txt(renderWindow, "SKOR", {px + 8, iy}, 12, {140, 140, 200});
+            txt(renderWindow, "SCORE", {px + 8, iy}, 12, {140, 140, 200});
             txt(renderWindow, std::to_string(gameState.score), {px + 8, iy + 16}, 16, {255, 255, 100});
-            txt(renderWindow, "SEVIYE", {px + 8, iy + 44}, 12, {140, 140, 200});
+            txt(renderWindow, "LEVEL", {px + 8, iy + 44}, 12, {140, 140, 200});
             txt(renderWindow, std::to_string(gameState.level), {px + 8, iy + 60}, 16, {100, 255, 180});
-            txt(renderWindow, "SATIRLAR", {px + 8, iy + 88}, 12, {140, 140, 200});
+            txt(renderWindow, "LINES", {px + 8, iy + 88}, 12, {140, 140, 200});
             txt(renderWindow, std::to_string(gameState.linesCleared), {px + 8, iy + 104}, 16, {180, 220, 255});
 
             float jy = iy + 140;
-            txt(renderWindow, "JETON", {px + 8, jy}, 12, {220, 200, 80});
+            txt(renderWindow, "TOKENS", {px + 8, jy}, 12, {220, 200, 80});
             txt(renderWindow, std::to_string(gameState.slotMachine.tokens), {px + 8, jy + 16}, 18, {255, 220, 50});
 
             if (gameState.levelTransitionActive) {
@@ -815,8 +815,8 @@ namespace tetris {
                 box.setOutlineThickness(1.5f);
                 renderWindow.draw(box);
 
-                txt(renderWindow, "BEKLEME", {px + 8, ly + 2.f}, 10, {200, 160, 255});
-                txt(renderWindow, std::to_string(secsLeft) + "sn",
+                txt(renderWindow, "COOLDOWN", {px + 8, ly + 2.f}, 10, {200, 160, 255});
+                txt(renderWindow, std::to_string(secsLeft) + "s",
                     {px + 8, ly + 18.f}, 18,
                     sf::Color(
                         static_cast<std::uint8_t>(200 + 55 * pulse),
@@ -907,7 +907,7 @@ namespace tetris {
             renderWindow.draw(modal);
 
             // 3. Üst Başlık
-            sf::Text title(font, "YENI GUC KAZANDIN!", 22);
+            sf::Text title(font, "NEW POWER EARNED!", 22);
             title.setFillColor(sf::Color(255, 220, 50));
             title.setStyle(sf::Text::Bold);
             auto b1 = title.getLocalBounds();
@@ -937,7 +937,7 @@ namespace tetris {
             btnUse.setOutlineThickness(2.f);
             renderWindow.draw(btnUse);
 
-            sf::Text txtUse(font, "SIMDI KULLAN", 14);
+            sf::Text txtUse(font, "USE NOW", 14);
             txtUse.setFillColor(sf::Color::White);
             txtUse.setStyle(sf::Text::Bold);
             auto b3 = txtUse.getLocalBounds();
@@ -958,7 +958,7 @@ namespace tetris {
             btnKeep.setOutlineThickness(2.f);
             renderWindow.draw(btnKeep);
 
-            sf::Text txtKeep(font, "SAKLA", 14);
+            sf::Text txtKeep(font, "KEEP", 14);
             txtKeep.setFillColor(sf::Color::White);
             txtKeep.setStyle(sf::Text::Bold);
             auto b4 = txtKeep.getLocalBounds();
@@ -978,7 +978,7 @@ namespace tetris {
             renderWindow.draw(dim);
 
             // Başlık
-            sf::Text title(font, ">> GELISTIRICI TEST MENUSU << (Kapatmak icin F1)", 18);
+            sf::Text title(font, ">> DEVELOPER TEST MENU << (Press F1 to close)", 18);
             title.setFillColor(sf::Color(100, 255, 150));
             title.setStyle(sf::Text::Bold);
             title.setPosition({60.f, 40.f});

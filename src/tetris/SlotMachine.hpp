@@ -65,20 +65,20 @@ struct PowerSlot {
 
     std::string name() const {
         switch (type) {
-            case PowerType::I_Small:    return "I×2: 1 Satir Temizle";
-            case PowerType::I_Big:      return "I×3: 2 Satir Temizle";
-            case PowerType::O_Small:    return "O×2: 4sn Durdur";
-            case PowerType::O_Big:      return "O×3: 8sn Durdur";
-            case PowerType::T_Big:      return "T×3: Istedigin Parça";
-            case PowerType::L_Small:    return "L×2: Sola Döndür";
-            case PowerType::L_Big:      return "L×3: 2x Sola Döndür";
-            case PowerType::J_Small:    return "J×2: Saga Döndür";
-            case PowerType::J_Big:      return "J×3: 2x Saga Döndür";
-            case PowerType::S_Small:    return "S×2: Sütun -1";
-            case PowerType::S_Big:      return "S×3: 2 Sütun -1";
-            case PowerType::Z_Small:    return "Z×2: 1 Blok Patlat";
-            case PowerType::Z_Big:      return "Z×3: 3 Blok Patlat";
-            case PowerType::SZ_Special: return "S+Z: Sütun -2";
+            case PowerType::I_Small:    return "Ix2: Clear 1 Row";
+            case PowerType::I_Big:      return "Ix3: Clear 2 Rows";
+            case PowerType::O_Small:    return "Ox2: Freeze 4s";
+            case PowerType::O_Big:      return "Ox3: Freeze 8s";
+            case PowerType::T_Big:      return "Tx3: Pick Any Piece";
+            case PowerType::L_Small:    return "Lx2: Rotate Left";
+            case PowerType::L_Big:      return "Lx3: 2x Rotate Left";
+            case PowerType::J_Small:    return "Jx2: Rotate Right";
+            case PowerType::J_Big:      return "Jx3: 2x Rotate Right";
+            case PowerType::S_Small:    return "Sx2: Column -1";
+            case PowerType::S_Big:      return "Sx3: 2 Columns -1";
+            case PowerType::Z_Small:    return "Zx2: Destroy 1 Block";
+            case PowerType::Z_Big:      return "Zx3: Destroy 3 Blocks";
+            case PowerType::SZ_Special: return "S+Z: Column -2";
             default:                    return "?";
         }
     }
