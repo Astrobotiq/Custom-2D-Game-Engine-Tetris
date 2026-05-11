@@ -117,7 +117,8 @@ namespace tetris {
             if (selectionIndex < 0 || selectionIndex >= SELECTION_SIZE) return false;
 
             Piece piece = selectionPieces[selectionIndex];
-            auto [valid, placed] = board.getDirectPlacement(piece, targetCol, targetRow);
+
+            auto [valid, placed] = board.getDirectPlacement(piece, targetCol, targetRow, &fallingPiece);
             if (!valid) return false;
 
             board.place(placed);
@@ -140,10 +141,8 @@ namespace tetris {
             if (!slotMachine.canReroll()) return false;
             slotMachine.tokens -= SlotMachine::REROLL_COST;
 
-            // 3 yeni parça üret
             refreshSelectionPieces();
 
-            // Kombo kontrolü: 3 slottaki parça tiplerini al
             std::array<TetrominoType, 3> types = {
                 selectionPieces[0].type,
                 selectionPieces[1].type,
@@ -152,9 +151,8 @@ namespace tetris {
 
             SlotResult result = slotMachine.evaluateCombo(types);
 
-            if (result.hasCombo) {
-                slotMachine.awardPower(result.power);
-            }
+            fallingPiece.row = 0;
+            fallAccum = 0.f;
 
             if (onSlotResult) onSlotResult(result);
             return true;
@@ -249,10 +247,38 @@ namespace tetris {
                 // Level atlandı — 15 saniyelik geçiş dondurması başlat
                 levelTransitionTimer = 25.f;
                 levelTransitionActive = true;
-                fallAccum = 0.f; // Birikmiş düşüş zamanını sıfırla
+
+                // YENİ: Düşen parçayı yok etmeden en üste geri gönder
+                fallingPiece.row = 0;
+                fallAccum = 0.f;
             }
             level = newLevel;
             fallInterval = std::max(0.1f, 1.0f - (level - 1) * 0.08f);
+        }
+
+        void spawnFallingPiece() {
+            fallingPiece = nextPieces[0];
+            fallingPiece.row = 0;
+            // Önceki turda hesaplanıp saklanan col'u kullan (okla gösterilen yer)
+            fallingPiece.col = nextPieceCol;
+
+            // Jeton şansı: TOKEN_CHANCE %
+            std::uniform_int_distribution<int> tokenRoll(0, 99);
+            fallingHasToken = (tokenRoll(rng) < SlotMachine::TOKEN_CHANCE);
+
+            fallingPiece.hasToken = fallingHasToken;
+
+            nextPieces[0] = nextPieces[1];
+            nextPieces[1] = nextPieces[2];
+            nextPieces[2] = spawnPieceRandom();
+
+            // Yeni nextPieces[0] için col'u şimdiden hesapla ve sakla
+            nextPieceCol = chooseFallingCol(nextPieces[0]);
+
+            if (!board.canPlace(fallingPiece)) {
+                gameOver = true;
+                if (onGameOver) onGameOver();
+            }
         }
 
     private:
@@ -424,31 +450,6 @@ namespace tetris {
             // 3. ADIM: Tamamen rastgele seçim yapılacaksa, sadece güvenli sınırlar içinde zarlıyoruz
             std::uniform_int_distribution<int> colDist(minAllowedCol, maxAllowedCol);
             return colDist(rng);
-        }
-
-        void spawnFallingPiece() {
-            fallingPiece = nextPieces[0];
-            fallingPiece.row = 0;
-            // Önceki turda hesaplanıp saklanan col'u kullan (okla gösterilen yer)
-            fallingPiece.col = nextPieceCol;
-
-            // Jeton şansı: TOKEN_CHANCE %
-            std::uniform_int_distribution<int> tokenRoll(0, 99);
-            fallingHasToken = (tokenRoll(rng) < SlotMachine::TOKEN_CHANCE);
-
-            fallingPiece.hasToken = fallingHasToken;
-
-            nextPieces[0] = nextPieces[1];
-            nextPieces[1] = nextPieces[2];
-            nextPieces[2] = spawnPieceRandom();
-
-            // Yeni nextPieces[0] için col'u şimdiden hesapla ve sakla
-            nextPieceCol = chooseFallingCol(nextPieces[0]);
-
-            if (!board.canPlace(fallingPiece)) {
-                gameOver = true;
-                if (onGameOver) onGameOver();
-            }
         }
 
         void stepFallingPiece() {

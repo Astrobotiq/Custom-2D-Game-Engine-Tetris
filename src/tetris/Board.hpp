@@ -62,7 +62,23 @@ public:
     }
 
     // ── Çarpışma kontrolü ────────────────────────────────────────────────────
-    bool canPlace(const Piece& piece) const {
+    bool canPlace(const Piece& piece, const Piece* fallingPiece = nullptr) const {
+
+        // 1. Eğer düşen parça gönderildiyse, sürüklenen parça ile çakışıyor mu kontrol et
+        if (fallingPiece != nullptr) {
+            auto draggedCells = piece.cells();
+            auto fallingCells = fallingPiece->cells();
+
+            for (const auto& dCell : draggedCells) {
+                for (const auto& fCell : fallingCells) {
+                    if (dCell == fCell) {
+                        return false; // Düşen parça ile çakışma var!
+                    }
+                }
+            }
+        }
+
+        // 2. Tahta sınırları ve yerleşmiş bloklarla çarpışma kontrolü
         for (auto [r, c] : piece.cells()) {
             if (c < 0 || c >= BOARD_COLS) return false;
             if (r >= BOARD_ROWS)          return false;
@@ -128,7 +144,7 @@ public:
     }
 
     // ── Sürüklenen parça için "en iyi yerleşim" (Puzzle Tarzı Serbest Mod) ────
-    std::pair<bool, Piece> findDropPosition(Piece piece, int targetCol, int targetRow = 0) const {
+    std::pair<bool, Piece> findDropPosition(Piece piece, int targetCol, int targetRow, const Piece* fallingPiece = nullptr) const {
         int minC = std::numeric_limits<int>::max();
         int maxC = std::numeric_limits<int>::min();
         int minR = std::numeric_limits<int>::max();
@@ -144,28 +160,23 @@ public:
             minC = 0; maxC = 0; minR = 0; maxR = 0;
         }
 
-        // Fare pozisyonunu, parçanın "sol üst" köşesine göre değil,
-        // "merkezine" göre hizalamak için offset hesapla. (1. Sorunun Çözümü)
         int centerOffsetX = minC + (maxC - minC + 1) / 2;
         int centerOffsetY = minR + (maxR - minR + 1) / 2;
 
         piece.col = targetCol - centerOffsetX;
         piece.row = targetRow - centerOffsetY;
 
-        // Tahta sınırları dışına kaçmasını engelle
         piece.col = std::clamp(piece.col, -minC, BOARD_COLS - 1 - maxC);
         piece.row = std::clamp(piece.row, -maxR, BOARD_ROWS - 1 - maxR);
 
-        // O lokasyonda başka blok var mı? (GHOST düşüşü İPTAL - 2. Sorunun Çözümü)
-        if (!canPlace(piece)) return {false, piece};
+        if (!canPlace(piece, fallingPiece)) return {false, piece};
 
         return {true, piece};
     }
 
     // ── Direkt yerleşim: drag & drop bırakma anı (Puzzle Tarzı) ───────────────
-    std::pair<bool, Piece> getDirectPlacement(Piece piece, int targetCol, int targetRow) const {
-        // Artık bırakma anı ile önizleme anı birebir aynı mantıkta çalışacak.
-        return findDropPosition(piece, targetCol, targetRow);
+    std::pair<bool, Piece> getDirectPlacement(Piece piece, int targetCol, int targetRow, const Piece* fallingPiece = nullptr) const {
+        return findDropPosition(piece, targetCol, targetRow, fallingPiece);
     }
 
 private:

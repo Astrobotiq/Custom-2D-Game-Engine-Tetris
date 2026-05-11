@@ -32,7 +32,6 @@ enum class PowerType {
     O_Big,     // 3×O → Zamanı 8 saniye durdur
 
     // T kombinasyonları
-    T_Small,   // 2×T → bir sonraki parçayı yeniden seç
     T_Big,     // 3×T → istediğin parçayı seç ve yerleştir
 
     // L kombinasyonları
@@ -70,7 +69,6 @@ struct PowerSlot {
             case PowerType::I_Big:      return "I×3: 2 Satir Temizle";
             case PowerType::O_Small:    return "O×2: 4sn Durdur";
             case PowerType::O_Big:      return "O×3: 8sn Durdur";
-            case PowerType::T_Small:    return "T×2: Parçayi Yenile";
             case PowerType::T_Big:      return "T×3: Istedigin Parça";
             case PowerType::L_Small:    return "L×2: Sola Döndür";
             case PowerType::L_Big:      return "L×3: 2x Sola Döndür";
@@ -91,7 +89,7 @@ struct PowerSlot {
                 return sf::Color(0, 240, 240);
             case PowerType::O_Small: case PowerType::O_Big:
                 return sf::Color(240, 240, 0);
-            case PowerType::T_Small: case PowerType::T_Big:
+            case PowerType::T_Big:
                 return sf::Color(160, 0, 240);
             case PowerType::L_Small: case PowerType::L_Big:
                 return sf::Color(240, 160, 0);
@@ -225,7 +223,7 @@ private:
         switch (type) {
             case TetrominoType::I: return big ? PowerType::I_Big : PowerType::I_Small;
             case TetrominoType::O: return big ? PowerType::O_Big : PowerType::O_Small;
-            case TetrominoType::T: return big ? PowerType::T_Big : PowerType::T_Small;
+            case TetrominoType::T: return PowerType::T_Big;
             case TetrominoType::L: return big ? PowerType::L_Big : PowerType::L_Small;
             case TetrominoType::J: return big ? PowerType::J_Big : PowerType::J_Small;
             case TetrominoType::S: return big ? PowerType::S_Big : PowerType::S_Small;

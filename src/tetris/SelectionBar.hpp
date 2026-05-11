@@ -23,7 +23,7 @@ struct DragState {
 struct SlotAnimState {
     bool  spinning    { false };
     float timer       { 0.f  };
-    float duration    { 0.8f };  // Toplam spin süresi
+    float duration    { 2.f };  // Toplam spin süresi
     // Animasyon sırasında ekranda dönen "sahte" tipler
     std::array<TetrominoType, 3> displayTypes {
         TetrominoType::I, TetrominoType::O, TetrominoType::T
