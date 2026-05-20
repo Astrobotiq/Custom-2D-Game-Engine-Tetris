@@ -67,6 +67,7 @@ namespace tetris {
         std::function<void()> onGameOver;
         // Slot machine sonucu döndüğünde: güç kazanıldıysa bildir
         std::function<void(SlotResult)> onSlotResult;
+        std::function<void(FreeSlotResult)> onFreeSlotResult;
 
         explicit GameState(std::uint32_t seed = 42)
             : rng(seed) {
@@ -141,7 +142,7 @@ namespace tetris {
             if (!slotMachine.canReroll()) return false;
             slotMachine.tokens -= SlotMachine::REROLL_COST;
 
-            refreshSelectionPieces();
+            refreshSelectionPiecesRandom();
 
             std::array<TetrominoType, 3> types = {
                 selectionPieces[0].type,
@@ -164,11 +165,19 @@ namespace tetris {
         // Jetonsuz slot yenileme — T gücü için
         void freeReroll(int slotCount) {
             if (slotCount >= SELECTION_SIZE) {
-                refreshSelectionPieces(); // Tüm slotları yenile
+                refreshSelectionPiecesRandom(); // Tüm slotları yenile
             } else {
                 for (int i = 0; i < slotCount && i < SELECTION_SIZE; ++i)
-                    selectionPieces[i] = spawnPieceAware(slotQuality(i));
+                    selectionPieces[i] = spawnPieceRandom();
             }
+            std::array<TetrominoType, 3> types = {
+                selectionPieces[0].type,
+                selectionPieces[1].type,
+                selectionPieces[2].type
+            };
+            FreeSlotResult result = {types};
+
+            if (onFreeSlotResult) onFreeSlotResult(result);
         }
 
         PowerType activatePower(int index) {
@@ -418,6 +427,11 @@ namespace tetris {
         void refreshSelectionPieces() {
             for (int i = 0; i < SELECTION_SIZE; ++i)
                 selectionPieces[i] = spawnPieceAware(slotQuality(i));
+        }
+
+        void refreshSelectionPiecesRandom() {
+            for (int i = 0; i < SELECTION_SIZE; ++i)
+                selectionPieces[i] = spawnPieceRandom();
         }
 
         int chooseFallingCol(const Piece &piece) {

@@ -46,6 +46,9 @@ add_executable(TetrisGame src/main_tetris.cpp
 	src/tetris/ColorPalette.hpp
         src/tetris/PauseMenu.hpp
         src/tetris/TetrisHUD.hpp
+	src/tetris/AppSettings.hpp
+        src/tetris/ScoreManager.cpp
+	src/tetris/MainMenuScene.cpp
 )
 target_link_libraries(TetrisGame PRIVATE EngineLib)
 

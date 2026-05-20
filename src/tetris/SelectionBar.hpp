@@ -169,6 +169,13 @@ public:
         drawTokenCount(window, gs);
     }
 
+    void FreeStartSpin(GameState& gs) {
+        anim.spinning = true;
+        anim.timer    = 0.f;
+
+        gs.freezeFalling(true);
+    }
+
 private:
     // ── Reroll ───────────────────────────────────────────────────────────────
     void startSpin(GameState& gs) {

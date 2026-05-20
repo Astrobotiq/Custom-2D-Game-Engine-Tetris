@@ -15,16 +15,22 @@
 #include "PauseMenu.hpp"
 #include "TetrisHUD.hpp"
 #include "TetrisConstants.hpp"
+#include "tetris/AppSettings.hpp"
+#include "tetris/ScoreManager.hpp"
+#include <functional>
+#include <cctype>
 
 namespace tetris {
-
     class TetrisScene : public engine::Scene {
     public:
-        explicit TetrisScene(sf::RenderWindow &win)
+        explicit TetrisScene(sf::RenderWindow &win, AppSettings *appSettings, std::function<void()> returnToMenu)
             : window(win)
+              , settings(appSettings)
+              , onReturnToMenu(returnToMenu)
               , gameState(static_cast<std::uint32_t>(std::time(nullptr)))
               , boardRenderer({BOARD_X, BOARD_Y})
               , selectionBar({0.f, BAR_Y}, float(WIN_W)) {
+            playerName = settings->playerName;
             setupCallbacks();
         }
 
@@ -58,11 +64,17 @@ namespace tetris {
             audio.setVolume(engine::AudioBus::Music, 45.f);
             audio.setVolume(engine::AudioBus::SFX, 85.f);
             audio.playMusic("assets/music/bgm.ogg", true, 0.f);
+
+            // Ayarları uygula
+            applyPalette(settings->activePalette);
+            sfxEnabled = settings->sfxEnabled;
+            musicEnabled = settings->musicEnabled;
+            audio.setVolume(engine::AudioBus::SFX, sfxEnabled ? 85.f : 0.f);
+            audio.setVolume(engine::AudioBus::Music, musicEnabled ? 45.f : 0.f);
         }
 
         void update(float dt, engine::InputManager &input) override {
             if (gameState.gameOver) {
-                if (input.isPressed(sf::Keyboard::Key::R)) restartGame();
                 audio.update(dt);
                 return;
             }
@@ -75,16 +87,26 @@ namespace tetris {
 
             if (isSpinning) {
                 spinWaitTimer -= dt;
-                if (spinWaitTimer <= 0.f) {
-                    isSpinning = false; // Animasyon bitti!
-
-                    if (lastSlotResult.hasCombo) {
-                        showPowerModal = true; // Animasyon bittiği an modalı patlat
-                    } else {
-                        slotResultTimer = 2.5f; // Kombo yoksa banner çıksın
-                        gameState.freezeFalling(false); // Ve oyun düşmeye devam etsin
+                if (isFree) {
+                    if (spinWaitTimer <= 0.f) {
+                        isSpinning = false;
+                        slotResultTimer = 2.5f;
+                        gameState.freezeFalling(false);
                     }
                 }
+                else {
+                    if (spinWaitTimer <= 0.f) {
+                        isSpinning = false; // Animasyon bitti!
+
+                        if (lastSlotResult.hasCombo) {
+                            showPowerModal = true; // Animasyon bittiği an modalı patlat
+                        } else {
+                            slotResultTimer = 2.5f; // Kombo yoksa banner çıksın
+                            gameState.freezeFalling(false); // Ve oyun düşmeye devam etsin
+                        }
+                    }
+                }
+
             }
 
             if (input.isPressed(sf::Keyboard::Key::P))
@@ -112,10 +134,13 @@ namespace tetris {
         }
 
         void handleEvent(const sf::Event &event) {
-            if (gameState.gameOver) return;
+            if (gameState.gameOver) {
+                handleGameOverEvent(event);
+                return;
+            }
 
             if (gameState.paused) {
-                sf::Vector2f mouse = sf::Vector2f(sf::Mouse::getPosition(window));
+                sf::Vector2f mouse = window.mapPixelToCoords(sf::Mouse::getPosition(window));
                 if (event.is<sf::Event::MouseMoved>()) {
                     pauseMenu.handleMouseMove(mouse);
                 } else if (const auto *e = event.getIf<sf::Event::MouseButtonPressed>()) {
@@ -133,7 +158,7 @@ namespace tetris {
                 }
             }
 
-            sf::Vector2f mouse = sf::Vector2f(sf::Mouse::getPosition(window));
+            sf::Vector2f mouse = window.mapPixelToCoords(sf::Mouse::getPosition(window));
 
             // YENİ: Debug menüsü açıksa tıklamaları sadece o menü için işle
             if (showDebugMenu) {
@@ -238,7 +263,13 @@ namespace tetris {
         }
 
         void render(sf::RenderWindow &renderWindow, float) override {
-            renderWindow.clear(PALETTES[activePalette].background);
+            sf::Color letterboxCol = PALETTES[activePalette].panelBorder;
+            letterboxCol.r /= 2; letterboxCol.g /= 2; letterboxCol.b /= 2;
+            renderWindow.clear(letterboxCol);
+
+            sf::RectangleShape mainBg({float(WIN_W), float(WIN_H)});
+            mainBg.setFillColor(PALETTES[activePalette].background);
+            renderWindow.draw(mainBg);
 
             boardRenderer.setFlashRows(flashRows,
                                        flashDuration > 0 ? flashTimer / flashDuration : 0.f);
@@ -285,8 +316,6 @@ namespace tetris {
             if (tokenMilestoneNotifTimer > 0.f)
                 hud.renderTokenMilestoneNotif(renderWindow, tokenMilestoneNotifTimer);
 
-            renderWindow.setView(renderWindow.getDefaultView());
-
             if (showPowerModal) {
                 renderPowerModal(renderWindow);
             }
@@ -296,11 +325,13 @@ namespace tetris {
             }
 
             if (gameState.paused) {
-                pauseMenu.render(renderWindow, font, PALETTES[activePalette], sfxEnabled, musicEnabled, activePalette, WIN_W, WIN_H);
+                pauseMenu.render(renderWindow, font, PALETTES[activePalette], sfxEnabled, musicEnabled, activePalette,
+                                 WIN_W, WIN_H);
             }
 
-            if (showGameOver)
-                hud.renderOverlay(renderWindow, "GAME OVER", "Score: " + std::to_string(gameState.score) + "   R: Restart");
+            if (showGameOver) {
+                renderGameOverScreen(renderWindow);
+            }
         }
 
     private:
@@ -329,6 +360,7 @@ namespace tetris {
 
             gameState.onGameOver = [this]() {
                 showGameOver = true;
+                playerName = "";
                 audio.playSound("gameover");
                 audio.stopMusic(2.f);
             };
@@ -340,6 +372,7 @@ namespace tetris {
                 // Spin animasyonunun süresi (SelectionBar'daki animasyon kaç saniyeyse ona göre ayarla, örn: 1.5 saniye)
                 spinWaitTimer = 1.5f;
                 isSpinning = true;
+                isFree = false;
 
                 if (result.hasCombo) {
                     pendingPower.type = result.power;
@@ -349,21 +382,43 @@ namespace tetris {
                 gameState.freezeFalling(true);
             };
 
+            gameState.onFreeSlotResult = [this](FreeSlotResult result) {
+                lastFreeSlotResult = result;
+                audio.playSound("spin");
+                selectionBar.FreeStartSpin(gameState);
+
+                spinWaitTimer = 1.5f;
+                isSpinning = true;
+                isFree = true;
+
+                gameState.freezeFalling(true);
+            };
+
             pauseMenu.updateLayout(WIN_W, WIN_H);
 
             pauseMenu.onToggleSFX = [this]() {
                 sfxEnabled = !sfxEnabled;
+                settings->sfxEnabled = sfxEnabled; // YENİ: Ayarı kaydet
                 audio.setVolume(engine::AudioBus::SFX, sfxEnabled ? 85.f : 0.f);
             };
+
             pauseMenu.onToggleMusic = [this]() {
                 musicEnabled = !musicEnabled;
+                settings->musicEnabled = musicEnabled; // YENİ: Ayarı kaydet
                 audio.setVolume(engine::AudioBus::Music, musicEnabled ? 45.f : 0.f);
             };
+
             pauseMenu.onSelectPalette = [this](int idx) {
                 applyPalette(idx);
+                settings->activePalette = idx; // YENİ: Ayarı kaydet
             };
+
             pauseMenu.onResume = [this]() {
                 gameState.paused = false;
+            };
+
+            pauseMenu.onMainMenu = [this]() {
+                if (onReturnToMenu) onReturnToMenu();
             };
 
             // Başlangıç paletini uygula
@@ -568,7 +623,8 @@ namespace tetris {
         }
 
         void addPowerBlastParticles(sf::Color c) {
-            particleSystem.emitExplosion(sf::Vector2f{BOARD_X + BOARD_PIXEL_W * 0.5f, BOARD_Y + BOARD_PIXEL_H * 0.5f}, c, 60);
+            particleSystem.emitExplosion(sf::Vector2f{BOARD_X + BOARD_PIXEL_W * 0.5f, BOARD_Y + BOARD_PIXEL_H * 0.5f},
+                                         c, 60);
         }
 
         void addLineClearParticles(const std::vector<int> &rows) {
@@ -697,7 +753,8 @@ namespace tetris {
                 int col = i % 3;
                 int row = i / 3;
 
-                sf::FloatRect btnRect({startX + col * (btnW + spacingX), startY + row * (btnH + spacingY)}, {btnW, btnH});
+                sf::FloatRect btnRect({startX + col * (btnW + spacingX), startY + row * (btnH + spacingY)},
+                                      {btnW, btnH});
                 bool hover = btnRect.contains(mouse);
 
                 PowerSlot dummySlot;
@@ -706,7 +763,9 @@ namespace tetris {
 
                 sf::RectangleShape btn(btnRect.size);
                 btn.setPosition(btnRect.position);
-                btn.setFillColor(hover ? sf::Color(pColor.r / 3, pColor.g / 3, pColor.b / 3, 255) : sf::Color(30, 30, 40, 255));
+                btn.setFillColor(hover
+                                     ? sf::Color(pColor.r / 3, pColor.g / 3, pColor.b / 3, 255)
+                                     : sf::Color(30, 30, 40, 255));
                 btn.setOutlineColor(pColor);
                 btn.setOutlineThickness(hover ? 2.f : 1.f);
                 renderWindow.draw(btn);
@@ -734,9 +793,126 @@ namespace tetris {
             powerSelectMode = false;
         }
 
+        void handleGameOverEvent(const sf::Event &event) {
+            if (const auto *key = event.getIf<sf::Event::KeyPressed>()) {
+                if (key->code == sf::Keyboard::Key::Backspace) {
+                    if (!playerName.empty()) playerName.pop_back();
+                } else if (playerName.size() < 3) {
+                    // A'dan Z'ye kadar olan tuşları yakala
+                    int code = static_cast<int>(key->code);
+                    int aCode = static_cast<int>(sf::Keyboard::Key::A);
+                    int zCode = static_cast<int>(sf::Keyboard::Key::Z);
+
+                    if (code >= aCode && code <= zCode) {
+                        playerName += static_cast<char>('A' + (code - aCode));
+                    }
+                }
+            }
+            // (Alternatif) Backspace tuşu
+            else if (const auto *k = event.getIf<sf::Event::KeyPressed>()) {
+                if (k->code == sf::Keyboard::Key::Backspace && !playerName.empty()) {
+                    playerName.pop_back();
+                }
+            }
+
+            // 2. Mouse Tıklamaları
+            sf::Vector2f mouse = window.mapPixelToCoords(sf::Mouse::getPosition(window));
+            if (const auto *e = event.getIf<sf::Event::MouseButtonPressed>()) {
+                if (e->button == sf::Mouse::Button::Left) {
+                    // KAYDET VE ÇIK
+                    if (btnSaveRect.contains(mouse)) {
+                        if (playerName.empty()) playerName = "UNK";
+                        settings->playerName = playerName; // İsmi hafızada tut
+
+                        // Skoru diske kaydet
+                        auto scores = ScoreManager::load("assets/scores.csv");
+                        ScoreManager::Entry newEntry{
+                            playerName, gameState.score, gameState.level, gameState.linesCleared
+                        };
+                        ScoreManager::addEntry(scores, newEntry);
+                        ScoreManager::save(scores, "assets/scores.csv");
+
+                        if (onReturnToMenu) onReturnToMenu(); // Ana menüye dön
+                    }
+                    // TEKRAR OYNA
+                    else if (btnPlayAgainRect.contains(mouse)) {
+                        restartGame();
+                    }
+                    // KAYDETMEDEN ÇIK
+                    else if (btnMenuRect.contains(mouse)) {
+                        if (onReturnToMenu) onReturnToMenu();
+                    }
+                }
+            }
+        }
+
+        void renderGameOverScreen(sf::RenderWindow &renderWindow) {
+            if (!fontLoaded) return;
+
+            // Arka planı karart
+            sf::RectangleShape dim({float(WIN_W), float(WIN_H)});
+            dim.setFillColor(sf::Color(0, 0, 0, 220));
+            renderWindow.draw(dim);
+
+            auto drawText = [&](const std::string &str, float x, float y, int size, sf::Color col, bool bold = false) {
+                sf::Text t(font, str, size);
+                t.setFillColor(col);
+                if (bold) t.setStyle(sf::Text::Bold);
+                sf::FloatRect b = t.getLocalBounds();
+                t.setPosition({x - b.size.x / 2.f, y});
+                renderWindow.draw(t);
+            };
+
+            float cx = WIN_W / 2.f;
+
+            drawText("GAME OVER", cx, 150.f, 48, PALETTES[activePalette].uiAccent, true);
+            drawText("SCORE: " + std::to_string(gameState.score), cx, 240.f, 24, sf::Color::White);
+            drawText(
+                "LEVEL: " + std::to_string(gameState.level) + "    LINES: " + std::to_string(gameState.linesCleared),
+                cx, 280.f, 20, sf::Color(200, 200, 200));
+
+            // İsim Giriş Alanı
+            drawText("ENTER INITIALS (A-Z)", cx, 360.f, 16, sf::Color(150, 150, 150));
+
+            sf::RectangleShape nameBox({120.f, 50.f});
+            nameBox.setPosition({cx - 60.f, 390.f});
+            nameBox.setFillColor(sf::Color(30, 30, 40));
+            nameBox.setOutlineThickness(2.f);
+            nameBox.setOutlineColor(PALETTES[activePalette].uiAccent);
+            renderWindow.draw(nameBox);
+
+            // Yanıp sönen imleç efekti
+            std::string displayStr = playerName;
+            if (displayStr.size() < 3 && static_cast<int>(std::time(nullptr) * 2) % 2 == 0) {
+                displayStr += "_";
+            }
+            drawText(displayStr, cx, 400.f, 24, sf::Color::Yellow, true);
+
+            sf::Vector2f mouse = window.mapPixelToCoords(sf::Mouse::getPosition(window));
+
+            // Buton Çizici Yardımcı
+            auto drawBtn = [&](sf::FloatRect &rect, float y, const std::string &text, sf::Color baseCol) {
+                rect = sf::FloatRect({cx - 120.f, y}, {240.f, 40.f});
+                bool hover = rect.contains(mouse);
+
+                sf::RectangleShape rs(rect.size);
+                rs.setPosition(rect.position);
+                rs.setFillColor(hover ? baseCol : sf::Color(baseCol.r / 2, baseCol.g / 2, baseCol.b / 2));
+                rs.setOutlineThickness(2.f);
+                rs.setOutlineColor(sf::Color::White);
+                renderWindow.draw(rs);
+
+                drawText(text, cx, y + 8.f, 18, sf::Color::White, true);
+            };
+
+            drawBtn(btnSaveRect, 480.f, "SAVE & MENU", sf::Color(40, 150, 40));
+            drawBtn(btnPlayAgainRect, 540.f, "PLAY AGAIN", sf::Color(150, 100, 40));
+            drawBtn(btnMenuRect, 600.f, "MENU (NO SAVE)", sf::Color(150, 40, 40));
+        }
+
         void applyPalette(int index) {
             activePalette = index;
-            const auto& p = PALETTES[index];
+            const auto &p = PALETTES[index];
             boardRenderer.setColors(p.boardBg, p.gridLines, p.panelBorder);
             // Tetromino renkleri render sırasında getPieceColor ile çözülecek
         }
@@ -758,6 +934,11 @@ namespace tetris {
         // Slot machine sonuç gösterimi
         SlotResult lastSlotResult;
         float slotResultTimer{0.f};
+
+        FreeSlotResult lastFreeSlotResult;
+        float freeSlotResultTimer{0.f};
+
+        bool isFree{false};
 
         // Güç seçim modu
         bool powerSelectMode{false};
@@ -796,5 +977,14 @@ namespace tetris {
         PauseMenu pauseMenu;
 
         TetrisHUD hud;
+
+        AppSettings *settings;
+        std::function<void()> onReturnToMenu;
+
+        // Game Over / Score State
+        std::string playerName{"AAA"};
+        sf::FloatRect btnSaveRect;
+        sf::FloatRect btnPlayAgainRect;
+        sf::FloatRect btnMenuRect;
     };
 } // namespace tetris
