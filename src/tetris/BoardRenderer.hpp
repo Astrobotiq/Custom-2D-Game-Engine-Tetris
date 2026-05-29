@@ -34,6 +34,8 @@ namespace tetris {
             }
         }
 
+        void setFont(const sf::Font& f) { m_font = &f; }
+
         // Sürüklenen parçanın önizlemesini ayarla (null = gösterme)
         void setDragPreview(std::optional<Piece> piece, bool valid) {
             m_dragPreview = piece;
@@ -250,21 +252,62 @@ namespace tetris {
         void drawBoard(sf::RenderWindow &window, const Board &board) {
             sf::RectangleShape cell({CELL_SIZE - 2.f, CELL_SIZE - 2.f});
             cell.setOrigin({(CELL_SIZE - 2.f) * 0.5f, (CELL_SIZE - 2.f) * 0.5f});
+
             for (int r = 0; r < BOARD_ROWS; ++r) {
                 for (int c = 0; c < BOARD_COLS; ++c) {
                     auto color = board.getCell(c, r);
                     if (color == EMPTY_COLOR) continue;
 
                     float scale = m_cellScales[r][c];
-                    cell.setPosition({
-                        m_origin.x + c * CELL_SIZE + CELL_SIZE * 0.5f,
-                        m_origin.y + r * CELL_SIZE + CELL_SIZE * 0.5f
-                    });
+                    float posX = m_origin.x + c * CELL_SIZE + CELL_SIZE * 0.5f;
+                    float posY = m_origin.y + r * CELL_SIZE + CELL_SIZE * 0.5f;
+                    cell.setPosition({posX, posY});
                     cell.setScale({scale, scale});
-                    cell.setFillColor(color);
-                    cell.setOutlineColor(lighten(color, 60));
-                    cell.setOutlineThickness(-1.5f);
+
+                    auto special = board.getSpecialTile(c, r);
+                    if (special.type == SpecialTileType::Bomb) {
+                        cell.setFillColor(sf::Color(60, 10, 10));
+                        cell.setOutlineColor(sf::Color(255, 60, 60));
+                        cell.setOutlineThickness(-2.5f);
+                    } else if (special.type == SpecialTileType::Counter) {
+                        cell.setFillColor(color);
+                        cell.setOutlineColor(sf::Color::Cyan);
+                        cell.setOutlineThickness(-2.0f);
+                    } else {
+                        cell.setFillColor(color);
+                        cell.setOutlineColor(lighten(color, 60));
+                        cell.setOutlineThickness(-1.5f);
+                    }
+
                     window.draw(cell);
+
+                    if (m_font && special.type != SpecialTileType::None) {
+                        sf::Text txt(*m_font, "", 14);
+                        txt.setStyle(sf::Text::Bold);
+                        if (special.type == SpecialTileType::Bomb) {
+                            txt.setString("B");
+                            txt.setFillColor(sf::Color(255, 200, 50));
+                            sf::FloatRect b = txt.getLocalBounds();
+                            txt.setOrigin({b.position.x + b.size.x / 2.f, b.position.y + b.size.y / 2.f});
+                            txt.setPosition({posX, posY - 2.f});
+                            txt.setScale({scale, scale});
+                            window.draw(txt);
+                        } else if (special.type == SpecialTileType::Counter) {
+                            txt.setString(std::to_string(special.counterValue));
+                            txt.setFillColor(sf::Color::White);
+                            sf::FloatRect b = txt.getLocalBounds();
+                            txt.setOrigin({b.position.x + b.size.x / 2.f, b.position.y + b.size.y / 2.f});
+                            txt.setPosition({posX, posY - 2.f});
+                            txt.setScale({scale, scale});
+                            
+                            sf::Text shadow = txt;
+                            shadow.setFillColor(sf::Color(0, 0, 0, 180));
+                            shadow.setPosition({posX + 1.f, posY - 1.f});
+                            window.draw(shadow);
+                            
+                            window.draw(txt);
+                        }
+                    }
                 }
             }
         }
@@ -304,6 +347,7 @@ namespace tetris {
         sf::Vector2f m_origin;
         sf::Color m_gridColor;
         sf::RectangleShape m_background;
+        const sf::Font* m_font{nullptr};
 
         std::optional<Piece> m_dragPreview;
         bool m_dragPreviewValid{true};

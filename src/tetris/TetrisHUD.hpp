@@ -100,12 +100,133 @@ namespace tetris {
             txt(window, "LINES", sf::Vector2f{px + 8, iy + 92}, 12, sf::Color(140, 140, 200));
             txt(window, std::to_string(gameState.linesCleared), sf::Vector2f{px + 8, iy + 108}, 16, sf::Color(180, 220, 255), m_linesScale);
 
-            float jy = iy + 144;
-            txt(window, "TOKENS", sf::Vector2f{px + 8, jy}, 12, sf::Color(220, 200, 80));
-            txt(window, std::to_string(gameState.slotMachine.tokens), sf::Vector2f{px + 8, jy + 16}, 18, sf::Color(255, 220, 50), m_tokensScale);
+            float nextY = iy + 144.f;
+
+            bool drawTokens = (gameState.gameMode != GameMode::Ascension && 
+                               (gameState.gameMode != GameMode::Custom || gameState.customSettings.slotMachineEnabled));
+
+            if (drawTokens) {
+                float jy = iy + 144.f;
+                txt(window, "TOKENS", sf::Vector2f{px + 8, jy}, 12, sf::Color(220, 200, 80));
+                txt(window, std::to_string(gameState.slotMachine.tokens), sf::Vector2f{px + 8, jy + 16}, 18, sf::Color(255, 220, 50), m_tokensScale);
+                nextY = iy + 200.f;
+            }
+
+            // Draw Timer Box if the mode has a time limit or is a stopwatch
+            bool hasTimeLimit = (gameState.gameMode == GameMode::GarbageTimeAttack || 
+                                 gameState.gameMode == GameMode::ScoreTimeAttack || 
+                                 gameState.gameMode == GameMode::Ascension ||
+                                 (gameState.gameMode == GameMode::Custom && gameState.customSettings.timeLimitEnabled));
+            bool isStopwatch = (gameState.gameMode == GameMode::TacticalGarbageClear || 
+                                gameState.gameMode == GameMode::GarbageClear ||
+                                (gameState.gameMode == GameMode::Custom && !gameState.customSettings.timeLimitEnabled));
+
+            if (hasTimeLimit || isStopwatch) {
+                float ty = nextY;
+                nextY += 52.f;
+
+                int totalSecs = isStopwatch 
+                    ? static_cast<int>(std::floor(gameState.countdownTimer))
+                    : static_cast<int>(std::ceil(gameState.countdownTimer));
+                int mins = totalSecs / 60;
+                int secs = totalSecs % 60;
+                char timeBuf[16];
+                std::snprintf(timeBuf, sizeof(timeBuf), "%02d:%02d", mins, secs);
+
+                sf::Color timerColor = sf::Color(100, 255, 100);
+                sf::Vector2f tScale = {1.f, 1.f};
+
+                if (isStopwatch) {
+                    timerColor = sf::Color(100, 255, 255); // Cyan for stopwatch
+                } else {
+                    if (gameState.countdownTimer <= 10.f) {
+                        timerColor = sf::Color(255, 100, 100);
+                    } else if (gameState.countdownTimer <= 30.f) {
+                        timerColor = sf::Color(255, 220, 100);
+                    }
+
+                    if (gameState.countdownTimer <= 10.f) {
+                        float pulse = 1.f + 0.08f * std::sin(gameState.countdownTimer * 8.f);
+                        tScale = {pulse, pulse};
+                    }
+                }
+
+                txt(window, isStopwatch ? "TIME ELAPSED" : "TIME LEFT", sf::Vector2f{px + 8.f, ty}, 12, sf::Color(180, 160, 200));
+                txt(window, timeBuf, sf::Vector2f{px + 8.f, ty + 16.f}, 22, timerColor, tScale);
+            }
+
+            // Draw Goal Box
+            bool hasScoreGoal = (gameState.gameMode == GameMode::ScoreTimeAttack || 
+                                 gameState.gameMode == GameMode::Ascension ||
+                                 (gameState.gameMode == GameMode::Custom && gameState.customSettings.targetScoreEnabled));
+            bool hasGarbageGoal = (gameState.gameMode == GameMode::GarbageClear || 
+                                   gameState.gameMode == GameMode::GarbageTimeAttack || 
+                                   gameState.gameMode == GameMode::TacticalGarbageClear ||
+                                   (gameState.gameMode == GameMode::Custom && gameState.customSettings.garbageBoardEnabled));
+
+            if (hasScoreGoal) {
+                float gy = nextY;
+                nextY += 52.f;
+
+                txt(window, "TARGET SCORE", sf::Vector2f{px + 8.f, gy}, 11, sf::Color(180, 160, 200));
+                
+                std::string progressStr = std::to_string(gameState.score) + " / " + std::to_string(gameState.targetScore);
+                txt(window, progressStr, sf::Vector2f{px + 8.f, gy + 14.f}, 13, sf::Color::White);
+
+                float goalBarW = pw - 20.f;
+                float goalBarH = 4.f;
+                sf::RectangleShape goalBarBg(sf::Vector2f{goalBarW, goalBarH});
+                goalBarBg.setPosition(sf::Vector2f{px + 8.f, gy + 30.f});
+                goalBarBg.setFillColor(sf::Color(30, 30, 50));
+                window.draw(goalBarBg);
+
+                float ratio = std::clamp(static_cast<float>(gameState.score) / gameState.targetScore, 0.f, 1.f);
+                if (ratio > 0.f) {
+                    sf::RectangleShape barFill(sf::Vector2f{goalBarW * ratio, goalBarH});
+                    barFill.setPosition(sf::Vector2f{px + 8.f, gy + 30.f});
+                    barFill.setFillColor(sf::Color(255, 215, 0));
+                    window.draw(barFill);
+                }
+            } else if (hasGarbageGoal) {
+                float gy = nextY;
+                nextY += 46.f;
+
+                int blocksLeft = 0;
+                bool isTacticalGarbage = (gameState.gameMode == GameMode::TacticalGarbageClear || 
+                                          (gameState.gameMode == GameMode::Custom && gameState.customSettings.tacticalStepEnabled));
+                if (isTacticalGarbage) {
+                    blocksLeft = gameState.board.countOriginalGarbage();
+                } else {
+                    for (int r = 0; r < BOARD_ROWS; ++r) {
+                        for (int c = 0; c < BOARD_COLS; ++c) {
+                            if (!gameState.board.isEmpty(c, r)) {
+                                blocksLeft++;
+                            }
+                        }
+                    }
+                }
+
+                txt(window, "GARBAGE BLOCKS", sf::Vector2f{px + 8.f, gy}, 11, sf::Color(180, 160, 200));
+                txt(window, std::to_string(blocksLeft) + " REMAINING", sf::Vector2f{px + 8.f, gy + 14.f}, 13, sf::Color(255, 100, 100));
+            }
+
+            bool isTactical = (gameState.gameMode == GameMode::TacticalStep || 
+                               gameState.gameMode == GameMode::TacticalGarbageClear ||
+                               (gameState.gameMode == GameMode::Custom && gameState.customSettings.tacticalStepEnabled));
+            if (isTactical) {
+                int stepAmount = 1;
+                if (gameState.level >= 5) stepAmount = 3;
+                else if (gameState.level >= 3) stepAmount = 2;
+
+                float ty = nextY;
+                nextY += 46.f;
+                txt(window, "PIECE ADVANCE", sf::Vector2f{px + 8.f, ty}, 11, sf::Color(180, 160, 200));
+                std::string stepStr = std::to_string(stepAmount) + (stepAmount == 1 ? " BLOCK" : " BLOCKS");
+                txt(window, stepStr, sf::Vector2f{px + 8.f, ty + 14.f}, 13, sf::Color(255, 150, 50));
+            }
 
             if (gameState.levelTransitionActive) {
-                float ly = jy + 52.f;
+                float ly = nextY + 10.f;
                 int secsLeft = static_cast<int>(std::ceil(gameState.levelTransitionTimer));
                 float pulse = 0.5f + 0.5f * std::sin(gameState.levelTransitionTimer * 8.f);
 
@@ -146,6 +267,30 @@ namespace tetris {
             }
 
             if (!m_font) return;
+
+            bool isSlotMachineEnabled = true;
+            if (gameState.gameMode == GameMode::Custom && !gameState.customSettings.slotMachineEnabled) {
+                isSlotMachineEnabled = false;
+            }
+
+            if (!isSlotMachineEnabled) {
+                txt(window, "POWERS", sf::Vector2f{6.f, BOARD_Y + 8.f}, 13, sf::Color(180, 180, 255));
+                
+                sf::Text t1(*m_font, "SLOT MACHINE", 12);
+                t1.setFillColor(sf::Color(120, 120, 140));
+                sf::FloatRect b1 = t1.getLocalBounds();
+                t1.setOrigin({b1.position.x + b1.size.x / 2.f, b1.position.y + b1.size.y / 2.f});
+                t1.setPosition({LEFT_PANEL_W / 2.f, BOARD_Y + BOARD_PIXEL_H * 0.45f});
+                window.draw(t1);
+
+                sf::Text t2(*m_font, "DISABLED", 12);
+                t2.setFillColor(sf::Color(120, 120, 140));
+                sf::FloatRect b2 = t2.getLocalBounds();
+                t2.setOrigin({b2.position.x + b2.size.x / 2.f, b2.position.y + b2.size.y / 2.f});
+                t2.setPosition({LEFT_PANEL_W / 2.f, BOARD_Y + BOARD_PIXEL_H * 0.49f});
+                window.draw(t2);
+                return;
+            }
 
             txt(window, "POWERS", sf::Vector2f{6.f, BOARD_Y + 8.f}, 13, sf::Color(180, 180, 255));
 

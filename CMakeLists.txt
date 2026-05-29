@@ -49,6 +49,7 @@ add_executable(TetrisGame src/main_tetris.cpp
 	src/tetris/AppSettings.hpp
         src/tetris/ScoreManager.cpp
 	src/tetris/MainMenuScene.cpp
+	src/tetris/StatsManager.cpp
 )
 target_link_libraries(TetrisGame PRIVATE EngineLib)
 

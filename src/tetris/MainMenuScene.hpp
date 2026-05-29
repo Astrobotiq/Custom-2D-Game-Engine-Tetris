@@ -8,12 +8,9 @@
 #endif //SIMPLEENGINE2D_MAINMENUSCENE_HPP
 #pragma once
 #include "../SceneManager.hpp"
-#include "tetris/AppSettings.hpp"
-#include "tetris/ScoreManager.hpp"
+#include "tetris/StatsManager.hpp"
 #include <SFML/Graphics.hpp>
-#include <vector>
-#include <functional>
-#include <string>
+#include <map>
 
 namespace tetris {
 
@@ -45,9 +42,55 @@ namespace tetris {
         std::vector<float> btnScales;
 
         bool showScoreTable{false};
-        std::vector<ScoreManager::Entry> highScores;
+        std::map<GameMode, StatsManager::ModeStats> m_gameStats;
         sf::FloatRect btnBack;
         bool backHovered{false};
+
+        // Game Mode Submenu
+        bool m_showModeSelect{false};
+        std::vector<sf::FloatRect> m_modeBtns;
+        sf::FloatRect m_btnBackModeSelect;
+
+        // Score table navigation
+        GameMode m_scoreTableMode{GameMode::Classic};
+        sf::FloatRect btnScorePrev;
+        sf::FloatRect btnScoreNext;
+        bool prevScoreHovered{false};
+        bool nextScoreHovered{false};
+
+        // Garbage Ratio Selection Modal
+        bool m_showGarbageSelect{false};
+        GameMode m_pendingMode{GameMode::Classic};
+        sf::FloatRect btnRatioOpt1;
+        sf::FloatRect btnRatioOpt2;
+        sf::FloatRect btnRatioBack;
+        int hoveredRatioBtn{-1};
+
+        // Custom Mode Settings Menu
+        struct CustomConfigUI {
+            sf::FloatRect btnGravity;
+            sf::FloatRect btnTactical;
+            sf::FloatRect btnSlot;
+            sf::FloatRect btnAscension;
+            sf::FloatRect btnGarbage;
+            sf::FloatRect btnGarbageRatio;
+            sf::FloatRect btnSpecial;
+            sf::FloatRect btnScore;
+            sf::FloatRect btnTime;
+            sf::FloatRect btnStart;
+            sf::FloatRect btnBack;
+        };
+        bool m_showCustomConfig{false};
+        CustomConfigUI m_customUI;
+        int hoveredCustomBtn{-1};
+
+        // Score Time Selection Modal
+        bool m_showScoreTimeSelect{false};
+        sf::FloatRect btnScoreTimeOpt1;
+        sf::FloatRect btnScoreTimeOpt2;
+        sf::FloatRect btnScoreTimeOpt3;
+        sf::FloatRect btnScoreTimeBack;
+        int hoveredScoreTimeBtn{-1};
 
         // UI Animation & Juice Variables
         float m_introTimer{0.f};

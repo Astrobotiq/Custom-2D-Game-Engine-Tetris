@@ -52,6 +52,8 @@ namespace tetris {
         // Özel: S+Z (slot sonucunda değil, board_aware kontrolde)
         SZ_Special, // En yüksek sütunu 2 hücre indir
 
+        ExtraTime, // Ascension modunda extra zaman seçimi
+
         None
     };
 
@@ -78,6 +80,7 @@ namespace tetris {
                 case PowerType::Z_Small: return "Zx2: Destroy 1 Block";
                 case PowerType::Z_Big: return "Zx3: Destroy 3 Blocks";
                 case PowerType::SZ_Special: return "S+Z: Column -2";
+                case PowerType::ExtraTime: return "Extra Time +45s";
                 default: return "?";
             }
         }
@@ -98,6 +101,7 @@ namespace tetris {
                 case PowerType::Z_Small: return "Destroys 1 random block on board.";
                 case PowerType::Z_Big: return "Destroys 3 random blocks on board.";
                 case PowerType::SZ_Special: return "Lowers highest column by 2.";
+                case PowerType::ExtraTime: return "Adds 45 seconds to the timer.";
                 default: return "";
             }
         }
@@ -126,6 +130,8 @@ namespace tetris {
                     return sf::Color(240, 0, 0);
                 case PowerType::SZ_Special:
                     return sf::Color(200, 100, 255);
+                case PowerType::ExtraTime:
+                    return sf::Color(255, 100, 255);
                 default:
                     return sf::Color(120, 120, 120);
             }

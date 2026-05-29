@@ -3,6 +3,7 @@
 #include "Board.hpp"
 #include "Tetromino.hpp"
 #include "SlotMachine.hpp"
+#include "AppSettings.hpp"
 #include <random>
 #include <array>
 #include <optional>
@@ -69,9 +70,25 @@ namespace tetris {
         // Slot machine sonucu döndüğünde: güç kazanıldıysa bildir
         std::function<void(SlotResult)> onSlotResult;
         std::function<void(FreeSlotResult)> onFreeSlotResult;
+        std::function<void(int col, int row)> onBombExploded;
+
+        // Mod Değişkenleri
+        GameMode gameMode{GameMode::Classic};
+        bool gameWon{false};
+        float countdownTimer{120.f};
+        int targetScore{2000};
+        int ascensionTargetScore{1500};
+        std::function<void()> onGameWon;
+        CustomModeSettings customSettings;
 
         explicit GameState(std::uint32_t seed = 42)
             : rng(seed) {
+            board.onCellCleared = [this](int col, int row, sf::Color color) {
+                if (onCellCleared) onCellCleared(col, row, color);
+            };
+            board.onBombExploded = [this](int col, int row) {
+                if (onBombExploded) onBombExploded(col, row);
+            };
             for (auto &p: nextPieces) p = spawnPieceRandom();
             refreshSelectionPieces();
             // İlk spawnFallingPiece nextPieceCol'u kullanacak, önceden hesapla
@@ -81,13 +98,36 @@ namespace tetris {
 
         // ── Güncelleme ───────────────────────────────────────────────────────────
         void update(float dt) {
-            if (gameOver || paused) return;
+            if (gameOver || paused || gameWon) return;
 
             // Zamanı durdurma gücü aktifse sayacı azalt
             if (timeStopTimer > 0.f) {
                 timeStopTimer -= dt;
                 // Sayacın eksiye düşmesini engelle
                 if (timeStopTimer < 0.f) timeStopTimer = 0.f;
+            }
+
+            // Geri sayım sayacını yönet (TimeAttack veya Ascension modlarında)
+            bool hasTimeLimit = (gameMode == GameMode::GarbageTimeAttack || 
+                                 gameMode == GameMode::ScoreTimeAttack || 
+                                 gameMode == GameMode::Ascension ||
+                                 (gameMode == GameMode::Custom && customSettings.timeLimitEnabled));
+            if (hasTimeLimit) {
+                if (timeStopTimer <= 0.f && !levelTransitionActive) {
+                    countdownTimer -= dt;
+                    if (countdownTimer <= 0.f) {
+                        countdownTimer = 0.f;
+                        gameOver = true;
+                        if (onGameOver) onGameOver();
+                        return;
+                    }
+                }
+            } else if (gameMode == GameMode::TacticalGarbageClear || 
+                       gameMode == GameMode::GarbageClear ||
+                       (gameMode == GameMode::Custom && !customSettings.timeLimitEnabled)) {
+                if (timeStopTimer <= 0.f && !levelTransitionActive) {
+                    countdownTimer += dt;
+                }
             }
 
             // Level geçiş sayacını azalt
@@ -99,8 +139,11 @@ namespace tetris {
                 }
             }
 
-            // Eğer zaman durmamışsa, dondurulmamışsa, level geçişi yoksa ve yerçekimi açıksa düşmeye devam et
-            if (!debugDisableGravity && !fallingFrozen && timeStopTimer <= 0.f && !levelTransitionActive) {
+            // Eğer zaman durmamışsa, dondurulmamışsa, level geçişi yoksa, sıra tabanlı değilse ve yerçekimi açıksa düşmeye devam et
+            bool isTactical = (gameMode == GameMode::TacticalStep || 
+                               gameMode == GameMode::TacticalGarbageClear ||
+                               (gameMode == GameMode::Custom && !customSettings.gravityEnabled));
+            if (!debugDisableGravity && !fallingFrozen && timeStopTimer <= 0.f && !levelTransitionActive && !isTactical) {
                 fallAccum += dt;
                 if (fallAccum >= fallInterval) {
                     fallAccum -= fallInterval;
@@ -127,7 +170,18 @@ namespace tetris {
             processLineClears();
             refreshSelectionPieces();
 
-            //hardDropFallingPiece();
+            bool isTactical = (gameMode == GameMode::TacticalStep || 
+                               gameMode == GameMode::TacticalGarbageClear ||
+                               (gameMode == GameMode::Custom && customSettings.tacticalStepEnabled));
+            if (isTactical) {
+                int stepAmount = 1;
+                if (level >= 5) stepAmount = 3;
+                else if (level >= 3) stepAmount = 2;
+                for (int i = 0; i < stepAmount && !gameOver && !gameWon; ++i) {
+                    stepFallingPiece();
+                }
+            }
+
             return true;
         }
 
@@ -153,7 +207,10 @@ namespace tetris {
 
             SlotResult result = slotMachine.evaluateCombo(types);
 
-            fallingPiece.row = 0;
+            bool isTactical = (gameMode == GameMode::TacticalStep || gameMode == GameMode::TacticalGarbageClear);
+            if (!isTactical) {
+                fallingPiece.row = 0;
+            }
             fallAccum = 0.f;
 
             if (onSlotResult) onSlotResult(result);
@@ -196,6 +253,84 @@ namespace tetris {
             if (!freeze) fallAccum = 0.f; // Çözülünce sayacı sıfırla
         }
 
+        void setupGarbageBoard(float fillRatio = 0.40f) {
+            board = Board();
+            std::uniform_int_distribution<int> colorDist(1, 7);
+            std::uniform_real_distribution<float> fillDist(0.f, 1.f);
+            
+            std::array<sf::Color, 7> pieceColors = {
+                sf::Color(0, 240, 240), // I
+                sf::Color(240, 240, 0), // O
+                sf::Color(160, 0, 240), // T
+                sf::Color(0, 240, 0),   // S
+                sf::Color(240, 0, 0),   // Z
+                sf::Color(0, 0, 240),   // J
+                sf::Color(240, 160, 0)  // L
+            };
+
+            for (int r = BOARD_ROWS - 8; r < BOARD_ROWS; ++r) {
+                for (int c = 0; c < BOARD_COLS; ++c) {
+                    if (fillDist(rng) < fillRatio) {
+                        int colorIdx = colorDist(rng) - 1;
+                        board.setCell(c, r, pieceColors[colorIdx]);
+                        board.setOriginalGarbage(c, r, true);
+
+                        // Spawn special blocks
+                        bool spawnSpecial = (gameMode != GameMode::Custom || customSettings.specialBlocksEnabled);
+                        if (spawnSpecial) {
+                            std::uniform_real_distribution<float> specialDist(0.f, 1.f);
+                            float val = specialDist(rng);
+                            if (val < 0.10f) {
+                                std::uniform_int_distribution<int> countDist(2, 3);
+                                board.setSpecialTile(c, r, {SpecialTileType::Counter, countDist(rng)});
+                            } else if (val < 0.15f) {
+                                board.setSpecialTile(c, r, {SpecialTileType::Bomb, 0});
+                            }
+                        }
+                    }
+                }
+                
+                bool allEmpty = true;
+                bool allFilled = true;
+                for (int c = 0; c < BOARD_COLS; ++c) {
+                    if (!board.isEmpty(c, r)) allEmpty = false;
+                    else allFilled = false;
+                }
+                if (allFilled) {
+                    int holeCol = std::uniform_int_distribution<int>(0, BOARD_COLS - 1)(rng);
+                    board.setCell(holeCol, r, EMPTY_COLOR);
+                }
+                if (allEmpty) {
+                    int fillCol = std::uniform_int_distribution<int>(0, BOARD_COLS - 1)(rng);
+                    int colorIdx = colorDist(rng) - 1;
+                    board.setCell(fillCol, r, pieceColors[colorIdx]);
+                    board.setOriginalGarbage(fillCol, r, true);
+
+                    // Spawn special block if this guaranteed fill becomes special
+                    bool spawnSpecial = (gameMode != GameMode::Custom || customSettings.specialBlocksEnabled);
+                    if (spawnSpecial) {
+                        std::uniform_real_distribution<float> specialDist(0.f, 1.f);
+                        float val = specialDist(rng);
+                        if (val < 0.10f) {
+                            std::uniform_int_distribution<int> countDist(2, 3);
+                            board.setSpecialTile(fillCol, r, {SpecialTileType::Counter, countDist(rng)});
+                        } else if (val < 0.15f) {
+                            board.setSpecialTile(fillCol, r, {SpecialTileType::Bomb, 0});
+                        }
+                    }
+                }
+            }
+        }
+
+        bool isBoardEmpty() const {
+            for (int r = 0; r < BOARD_ROWS; ++r) {
+                for (int c = 0; c < BOARD_COLS; ++c) {
+                    if (!board.isEmpty(c, r)) return false;
+                }
+            }
+            return true;
+        }
+
         // ── Board analizi ile güç uygulama ───────────────────────────────────────
         void applyColumnLower(int colCount, int amount) {
             BoardAnalysis a = analyzeBoard();
@@ -209,9 +344,6 @@ namespace tetris {
                 for (int step = 0; step < amount; ++step) {
                     for (int r = 0; r < BOARD_ROWS; ++r) {
                         if (!board.isEmpty(col, r)) {
-                            if (onCellCleared) {
-                                onCellCleared(col, r, board.getCell(col, r));
-                            }
                             board.setCell(col, r, EMPTY_COLOR);
                             break;
                         }
@@ -232,9 +364,6 @@ namespace tetris {
             for (int i = 0; i < cleared; ++i) {
                 int col = filled[i].first;
                 int row = filled[i].second;
-                if (onCellCleared) {
-                    onCellCleared(col, row, board.getCell(col, row));
-                }
                 board.setCell(col, row, EMPTY_COLOR);
             }
         }
@@ -260,12 +389,55 @@ namespace tetris {
             }
         }
 
+        bool isHardFallAllowed() const {
+            return gameMode == GameMode::GarbageTimeAttack || 
+                   gameMode == GameMode::ScoreTimeAttack || 
+                   gameMode == GameMode::Ascension || 
+                   gameMode == GameMode::TacticalStep || 
+                   gameMode == GameMode::TacticalGarbageClear ||
+                   gameMode == GameMode::Custom;
+        }
+
+        void hardDropFallingPiece() {
+            Piece next = fallingPiece;
+            int dropDistance = 0;
+            while (true) {
+                next.row++;
+                if (!board.canPlace(next)) break;
+                fallingPiece = next;
+                dropDistance++;
+            }
+
+            if (dropDistance > 0) {
+                score += dropDistance * 2;
+                if (gameMode != GameMode::Ascension) {
+                    int newMilestone = (score / 1000);
+                    if (newMilestone > scoreTokenMilestone) {
+                        int tokensToAdd = newMilestone - scoreTokenMilestone;
+                        scoreTokenMilestone = newMilestone;
+                        for (int t = 0; t < tokensToAdd; ++t) slotMachine.addToken(1);
+                    }
+                }
+            }
+
+            board.place(fallingPiece);
+            if (onPieceLocked) onPieceLocked();
+            processLineClears();
+            spawnFallingPiece();
+            fallAccum = 0.f;
+        }
+
         void recalcLevel() {
             int newLevel = std::max(1, linesCleared / 10 + 1);
             if (newLevel > level) {
-                // Level atlandı — 15 saniyelik geçiş dondurması başlat
-                levelTransitionTimer = 25.f;
-                levelTransitionActive = true;
+                // Level atlandı — 25 saniyelik geçiş dondurması başlat (sadece belirli modlarda)
+                bool allowTransition = (gameMode == GameMode::Classic ||
+                                        gameMode == GameMode::GarbageClear ||
+                                        gameMode == GameMode::GarbageTimeAttack);
+                if (allowTransition) {
+                    levelTransitionTimer = 25.f;
+                    levelTransitionActive = true;
+                }
 
                 // YENİ: Düşen parçayı yok etmeden en üste geri gönder
                 fallingPiece.row = 0;
@@ -273,6 +445,12 @@ namespace tetris {
             }
             level = newLevel;
             fallInterval = std::max(0.1f, 1.0f - (level - 1) * 0.08f);
+            if (gameMode == GameMode::GarbageClear) {
+                fallInterval *= 2.0f;
+            }
+            if (gameMode == GameMode::Custom && !customSettings.gravityEnabled) {
+                fallInterval = 999999.f;
+            }
         }
 
         void spawnFallingPiece() {
@@ -281,9 +459,13 @@ namespace tetris {
             // Önceki turda hesaplanıp saklanan col'u kullan (okla gösterilen yer)
             fallingPiece.col = nextPieceCol;
 
-            // Jeton şansı: TOKEN_CHANCE %
-            std::uniform_int_distribution<int> tokenRoll(0, 99);
-            fallingHasToken = (tokenRoll(rng) < SlotMachine::TOKEN_CHANCE);
+            // Jeton şansı: TOKEN_CHANCE % (sadece Ascension modunda değilse)
+            if (gameMode != GameMode::Ascension) {
+                std::uniform_int_distribution<int> tokenRoll(0, 99);
+                fallingHasToken = (tokenRoll(rng) < SlotMachine::TOKEN_CHANCE);
+            } else {
+                fallingHasToken = false;
+            }
 
             fallingPiece.hasToken = fallingHasToken;
 
@@ -489,27 +671,15 @@ namespace tetris {
             }
         }
 
-        void hardDropFallingPiece() {
-            Piece next = fallingPiece;
-            while (true) {
-                next.row++;
-                if (!board.canPlace(next)) break;
-                fallingPiece = next;
-            }
-            board.place(fallingPiece);
-            if (onPieceLocked) onPieceLocked();
-            processLineClears();
-            spawnFallingPiece();
-            fallAccum = 0.f;
-        }
+
 
         void processLineClears() {
             std::vector<int> clearedRows;
             for (int r = 0; r < BOARD_ROWS; ++r)
                 if (board.isRowFull(r)) clearedRows.push_back(r);
 
-            // Jeton kontrolü: jeton taşıyan parça bu satırlarda mıydı?
-            if (fallingHasToken && !clearedRows.empty()) {
+            // Jeton kontrolü: jeton taşıyan parça bu satırlarda mıydı? (sadece Ascension modunda değilse)
+            if (gameMode != GameMode::Ascension && fallingHasToken && !clearedRows.empty()) {
                 slotMachine.addToken(1);
                 fallingHasToken = false;
             }
@@ -520,12 +690,14 @@ namespace tetris {
                 score += pts;
                 linesCleared += n;
 
-                // Her 1000 puanın katında 1 jeton ver
-                int newMilestone = (score / 1000);
-                if (newMilestone > scoreTokenMilestone) {
-                    int tokensToAdd = newMilestone - scoreTokenMilestone;
-                    scoreTokenMilestone = newMilestone;
-                    for (int t = 0; t < tokensToAdd; ++t) slotMachine.addToken(1);
+                // Her 1000 puanın katında 1 jeton ver (sadece Ascension modunda değilse)
+                if (gameMode != GameMode::Ascension) {
+                    int newMilestone = (score / 1000);
+                    if (newMilestone > scoreTokenMilestone) {
+                        int tokensToAdd = newMilestone - scoreTokenMilestone;
+                        scoreTokenMilestone = newMilestone;
+                        for (int t = 0; t < tokensToAdd; ++t) slotMachine.addToken(1);
+                    }
                 }
 
                 recalcLevel();

@@ -76,8 +76,18 @@ public:
 
     // ── Input ────────────────────────────────────────────────────────────────
     bool onMousePress(sf::Vector2f mousePos, GameState& gs) {
+        // Hard Fall butonu tıklandı mı?
+        if (gs.isHardFallAllowed() && hardFallButtonBounds().contains(mousePos)) {
+            if (!gs.paused && !gs.gameOver && !gs.gameWon && !anim.spinning) {
+                gs.hardDropFallingPiece();
+                return true;
+            }
+            return false;
+        }
+
         // Reroll butonu tıklandı mı?
-        if (rerollButtonBounds().contains(mousePos)) {
+        bool showSlotMachine = (gs.gameMode != GameMode::Ascension) && !(gs.gameMode == GameMode::Custom && !gs.customSettings.slotMachineEnabled);
+        if (showSlotMachine && rerollButtonBounds().contains(mousePos)) {
             if (gs.slotMachine.canReroll()) {
                 startSpin(gs);
                 return true;
@@ -167,8 +177,15 @@ public:
 
         if (drag.active) drawDraggingPiece(window);
 
-        drawRerollButton(window, gs);
-        drawTokenCount(window, gs);
+        bool showSlotMachine = (gs.gameMode != GameMode::Ascension) && !(gs.gameMode == GameMode::Custom && !gs.customSettings.slotMachineEnabled);
+        if (showSlotMachine) {
+            drawRerollButton(window, gs);
+            drawTokenCount(window, gs);
+        }
+
+        if (gs.isHardFallAllowed()) {
+            drawHardFallButton(window, gs);
+        }
     }
 
     void FreeStartSpin(GameState& gs) {
@@ -195,6 +212,41 @@ private:
         float btnX = originPos.x + width * 0.62f + 10.f;
         float btnY = originPos.y + (BAR_HEIGHT - btnH) * 0.5f;
         return sf::FloatRect{sf::Vector2f{btnX, btnY}, sf::Vector2f{btnW, btnH}};
+    }
+
+    sf::FloatRect hardFallButtonBounds() const {
+        float btnW = 100.f;
+        float btnH = 36.f;
+        float btnX = originPos.x + width * 0.62f + 110.f;
+        float btnY = originPos.y + (BAR_HEIGHT - btnH) * 0.5f;
+        return sf::FloatRect{sf::Vector2f{btnX, btnY}, sf::Vector2f{btnW, btnH}};
+    }
+
+    void drawHardFallButton(sf::RenderWindow& window, const GameState& gs) {
+        sf::FloatRect b = hardFallButtonBounds();
+        bool canPress = !gs.paused && !gs.gameOver && !gs.gameWon && !anim.spinning;
+
+        sf::RectangleShape btn(b.size);
+        btn.setPosition(b.position);
+        btn.setFillColor(canPress
+            ? sf::Color(80, 80, 180, 220)
+            : sf::Color(50, 50, 60, 150));
+        btn.setOutlineColor(canPress
+            ? sf::Color(120, 120, 255, 240)
+            : sf::Color(80, 80, 90, 150));
+        btn.setOutlineThickness(1.5f);
+        window.draw(btn);
+
+        if (!fontPtr) return;
+        sf::Text t(*fontPtr, "HARD DROP", 12);
+        t.setFillColor(canPress ? sf::Color::White : sf::Color(120,120,120));
+        t.setStyle(sf::Text::Bold);
+        auto lb = t.getLocalBounds();
+        t.setOrigin(sf::Vector2f{lb.size.x * 0.5f, lb.size.y * 0.5f});
+        t.setPosition(sf::Vector2f{
+            b.position.x + b.size.x * 0.5f,
+            b.position.y + b.size.y * 0.5f - lb.size.y * 0.1f});
+        window.draw(t);
     }
 
     void drawRerollButton(sf::RenderWindow& window, const GameState& gs) {

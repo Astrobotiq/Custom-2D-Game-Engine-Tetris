@@ -46,6 +46,7 @@ int main() {
                             window.create(sf::VideoMode({tetris::WIN_W, tetris::WIN_H}), "Tetris", sf::Style::Default, sf::State::Windowed);
                         }
                         window.setFramerateLimit(60);
+                        while (window.pollEvent()) {} // Discard old events
                         updateViewport(window, tetris::WIN_W, tetris::WIN_H);
                     }
                 }

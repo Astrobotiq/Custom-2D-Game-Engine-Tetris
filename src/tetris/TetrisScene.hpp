@@ -67,9 +67,68 @@ namespace tetris {
                 selectionBar.setFont(font);
                 fontLoaded = true;
                 hud.setFont(font);
+                boardRenderer.setFont(font);
             }
             powerSelectMode = false;
             selectedPowerIdx = -1;
+            showVictory = false;
+            showAscensionModal = false;
+            m_statsSaved = false;
+            m_newBest = false;
+            m_newWorst = false;
+
+            gameState.gameMode = settings->activeMode;
+            if (gameState.gameMode == GameMode::GarbageClear) {
+                gameState.setupGarbageBoard(settings->garbageRatio);
+                gameState.countdownTimer = 0.f;
+                gameState.fallInterval = 2.0f;
+            } else if (gameState.gameMode == GameMode::GarbageTimeAttack) {
+                gameState.setupGarbageBoard(settings->garbageRatio);
+                gameState.countdownTimer = 240.f;
+            } else if (gameState.gameMode == GameMode::ScoreTimeAttack) {
+                gameState.countdownTimer = settings->scoreTimeLimit;
+                gameState.targetScore = settings->scoreTimeTarget;
+            } else if (gameState.gameMode == GameMode::Ascension) {
+                gameState.countdownTimer = 90.f;
+                gameState.targetScore = 1500;
+            } else if (gameState.gameMode == GameMode::TacticalStep) {
+                gameState.countdownTimer = 0.f;
+            } else if (gameState.gameMode == GameMode::TacticalGarbageClear) {
+                gameState.setupGarbageBoard(settings->garbageRatio);
+                gameState.countdownTimer = 0.f;
+            } else if (gameState.gameMode == GameMode::Custom) {
+                gameState.customSettings = settings->customSettings;
+                if (gameState.customSettings.garbageBoardEnabled) {
+                    gameState.setupGarbageBoard(gameState.customSettings.garbageRatio);
+                } else {
+                    gameState.board.clear();
+                }
+                if (gameState.customSettings.timeLimitEnabled) {
+                    gameState.countdownTimer = gameState.customSettings.timeLimit;
+                } else {
+                    gameState.countdownTimer = 0.f;
+                }
+                if (gameState.customSettings.targetScoreEnabled) {
+                    gameState.targetScore = gameState.customSettings.targetScore;
+                } else {
+                    gameState.targetScore = 0;
+                }
+                if (gameState.customSettings.gravityEnabled) {
+                    gameState.fallInterval = 1.0f;
+                } else {
+                    gameState.fallInterval = 999999.f;
+                }
+            } else { // Classic
+                gameState.countdownTimer = 0.f;
+            }
+
+            gameState.onGameWon = [this]() {
+                showVictory = true;
+                playerName = "";
+                audio.playSound("levelup");
+                audio.stopMusic(2.f);
+                saveStats();
+            };
 
             // ── Ses efektlerini yükle ──────────────────────────────────────
             audio.loadSound("land", "assets/sounds/piece_land.wav");
@@ -108,7 +167,12 @@ namespace tetris {
             m_mouseTilt.y += (targetTiltY - m_mouseTilt.y) * 8.f * dt;
             m_tiltRotation += (targetRotation - m_tiltRotation) * 8.f * dt;
 
-            if (gameState.gameOver) {
+            if (gameState.gameOver || gameState.gameWon) {
+                audio.update(dt);
+                return;
+            }
+
+            if (showAscensionModal) {
                 audio.update(dt);
                 return;
             }
@@ -156,6 +220,65 @@ namespace tetris {
             int levelBefore = gameState.level;
             gameState.update(dt);
             selectionBar.update(dt, gameState);
+
+            // Win Condition check
+            bool isTacticalGarbage = (gameState.gameMode == GameMode::TacticalGarbageClear);
+            bool hasGarbageMode = (gameState.gameMode == GameMode::GarbageClear || 
+                                   gameState.gameMode == GameMode::GarbageTimeAttack);
+            if (isTacticalGarbage) {
+                if (gameState.board.countOriginalGarbage() == 0 && !gameState.gameWon) {
+                    gameState.gameWon = true;
+                    if (gameState.onGameWon) gameState.onGameWon();
+                }
+            } else if (hasGarbageMode && gameState.isBoardEmpty() && !gameState.gameWon) {
+                gameState.gameWon = true;
+                if (gameState.onGameWon) gameState.onGameWon();
+            }
+
+            if (gameState.gameMode == GameMode::ScoreTimeAttack && 
+                gameState.score >= gameState.targetScore && !gameState.gameWon) {
+                gameState.gameWon = true;
+                if (gameState.onGameWon) gameState.onGameWon();
+            }
+
+            // Custom Mode Win Conditions
+            if (gameState.gameMode == GameMode::Custom) {
+                const auto& cfg = gameState.customSettings;
+                bool shouldWin = false;
+                
+                if (cfg.garbageBoardEnabled) {
+                    if (cfg.tacticalStepEnabled) {
+                        if (gameState.board.countOriginalGarbage() == 0) {
+                            shouldWin = true;
+                        }
+                    } else {
+                        if (gameState.isBoardEmpty()) {
+                            shouldWin = true;
+                        }
+                    }
+                }
+                
+                if (cfg.targetScoreEnabled && gameState.score >= gameState.targetScore) {
+                    if (cfg.ascensionEnabled) {
+                        if (!showAscensionModal) {
+                            openAscensionModal();
+                        }
+                    } else {
+                        shouldWin = true;
+                    }
+                }
+                
+                if (shouldWin && !gameState.gameWon) {
+                    gameState.gameWon = true;
+                    if (gameState.onGameWon) gameState.onGameWon();
+                }
+            }
+
+            // Ascension Milestone check
+            if (gameState.gameMode == GameMode::Ascension && 
+                gameState.score >= gameState.targetScore && !showAscensionModal) {
+                openAscensionModal();
+            }
 
             if (gameState.level > levelBefore) {
                 audio.playSound("levelup");
@@ -212,6 +335,26 @@ namespace tetris {
                 return;
             }
 
+            if (showVictory) {
+                handleGameOverEvent(event);
+                return;
+            }
+
+            if (showAscensionModal) {
+                if (const auto *e = event.getIf<sf::Event::MouseButtonPressed>()) {
+                    if (e->button == sf::Mouse::Button::Left) {
+                        sf::Vector2f mouse = window.mapPixelToCoords(sf::Mouse::getPosition(window));
+                        for (int i = 0; i < 3; ++i) {
+                            if (ascensionCardRects[i].contains(mouse)) {
+                                chooseAscensionPower(i);
+                                break;
+                            }
+                        }
+                    }
+                }
+                return;
+            }
+
             if (gameState.paused) {
                 sf::Vector2f mouse = window.mapPixelToCoords(sf::Mouse::getPosition(window));
                 if (event.is<sf::Event::MouseMoved>()) {
@@ -231,7 +374,10 @@ namespace tetris {
                 }
                 
                 if (!gameState.paused && !gameState.gameOver && !showPowerModal && !showDebugMenu) {
-                    if (e->code == sf::Keyboard::Key::Num1) { usePowerHotkey(0); }
+                    if (e->code == sf::Keyboard::Key::Space && gameState.isHardFallAllowed() && !showAscensionModal && !isSpinning && !gameState.gameWon) {
+                        gameState.hardDropFallingPiece();
+                    }
+                    else if (e->code == sf::Keyboard::Key::Num1) { usePowerHotkey(0); }
                     else if (e->code == sf::Keyboard::Key::Num2) { usePowerHotkey(1); }
                     else if (e->code == sf::Keyboard::Key::Num3) { usePowerHotkey(2); }
                     else if (e->code == sf::Keyboard::Key::Num4) { usePowerHotkey(3); }
@@ -313,8 +459,14 @@ namespace tetris {
                     }
 
                     if (mouse.x < LEFT_PANEL_W && mouse.y < BAR_Y) {
-                        if (powerSelectMode) handlePowerClick(mouse);
-                        else handleLeftPanelToggle(mouse);
+                        bool isSlotMachineEnabled = true;
+                        if (gameState.gameMode == GameMode::Custom && !gameState.customSettings.slotMachineEnabled) {
+                            isSlotMachineEnabled = false;
+                        }
+                        if (isSlotMachineEnabled) {
+                            if (powerSelectMode) handlePowerClick(mouse);
+                            else handleLeftPanelToggle(mouse);
+                        }
                         return;
                     }
 
@@ -335,7 +487,11 @@ namespace tetris {
                 
                 // Mouse hover check for left panel powers
                 hoveredPowerIdx = -1;
-                if (mouse.x < LEFT_PANEL_W) {
+                bool isSlotMachineEnabled = true;
+                if (gameState.gameMode == GameMode::Custom && !gameState.customSettings.slotMachineEnabled) {
+                    isSlotMachineEnabled = false;
+                }
+                if (mouse.x < LEFT_PANEL_W && isSlotMachineEnabled) {
                     auto &powers = gameState.slotMachine.powers;
                     for (int i = 0; i < static_cast<int>(powers.size()); ++i) {
                         float y = BOARD_Y + 28.f + i * 44.f;
@@ -527,8 +683,16 @@ namespace tetris {
                                  WIN_W, WIN_H);
             }
 
+            if (showAscensionModal) {
+                renderAscensionModal(renderWindow);
+            }
+
             if (showGameOver) {
                 renderGameOverScreen(renderWindow);
+            }
+
+            if (showVictory) {
+                renderVictoryScreen(renderWindow);
             }
         }
 
@@ -603,11 +767,22 @@ namespace tetris {
                 }
             };
 
+            gameState.onBombExploded = [this](int col, int row) {
+                sf::Vector2f pos = sf::Vector2f{
+                    BOARD_X + col * CELL_SIZE + CELL_SIZE * 0.5f,
+                    BOARD_Y + row * CELL_SIZE + CELL_SIZE * 0.5f
+                };
+                trauma = std::min(1.f, trauma + 0.5f);
+                audio.playSound("clear4");
+                addBombExplosionParticles(pos);
+            };
+
             gameState.onGameOver = [this]() {
                 showGameOver = true;
                 playerName = "";
                 audio.playSound("gameover");
                 audio.stopMusic(2.f);
+                saveStats();
             };
 
             gameState.onSlotResult = [this](SlotResult result) {
@@ -828,6 +1003,12 @@ namespace tetris {
         }
 
         void usePowerHotkey(int index) {
+            bool isSlotMachineEnabled = true;
+            if (gameState.gameMode == GameMode::Custom && !gameState.customSettings.slotMachineEnabled) {
+                isSlotMachineEnabled = false;
+            }
+            if (!isSlotMachineEnabled) return;
+
             auto &powers = gameState.slotMachine.powers;
             if (index >= 0 && index < static_cast<int>(powers.size())) {
                 executePower(index, {0.f, 0.f});
@@ -917,6 +1098,42 @@ namespace tetris {
 
             particleSystem->burst(sf::Vector2f{BOARD_X + BOARD_PIXEL_W * 0.5f, BOARD_Y + BOARD_PIXEL_H * 0.5f},
                                   config, 60);
+        }
+
+        void addBombExplosionParticles(sf::Vector2f pos) {
+            if (!particleSystem) return;
+
+            // Fire particles: 25 orange/red particles, fast radial burst, rise slightly
+            engine::EmitterComponent fireConfig;
+            fireConfig.speed = 300.f;
+            fireConfig.speedSpread = 100.f;
+            fireConfig.direction = 0.f;
+            fireConfig.directionSpread = 180.f;
+            fireConfig.lifetime = 0.5f;
+            fireConfig.lifetimeSpread = 0.15f;
+            fireConfig.sizeStart = 10.f;
+            fireConfig.sizeEnd = 0.f;
+            fireConfig.colorStart = sf::Color(255, 120 + rand() % 80, 0, 240);
+            fireConfig.colorEnd = sf::Color(180, 30, 0, 0);
+            fireConfig.gravityScale = -0.2f;
+
+            particleSystem->burst(pos, fireConfig, 25);
+
+            // Smoke particles: 15 gray particles, slower, rises upward (negative gravity)
+            engine::EmitterComponent smokeConfig;
+            smokeConfig.speed = 100.f;
+            smokeConfig.speedSpread = 50.f;
+            smokeConfig.direction = -90.f;
+            smokeConfig.directionSpread = 45.f;
+            smokeConfig.lifetime = 0.9f;
+            smokeConfig.lifetimeSpread = 0.3f;
+            smokeConfig.sizeStart = 12.f;
+            smokeConfig.sizeEnd = 4.f;
+            smokeConfig.colorStart = sf::Color(100, 100, 110, 180);
+            smokeConfig.colorEnd = sf::Color(60, 60, 60, 0);
+            smokeConfig.gravityScale = -0.5f;
+
+            particleSystem->burst(pos, smokeConfig, 15);
         }
 
         void addLineClearParticles(const std::vector<int> &rows) {
@@ -1237,7 +1454,65 @@ namespace tetris {
             setupCallbacks();
             audio.resumeMusic();
             showGameOver = false;
+            showVictory = false;
+            showAscensionModal = false;
+            m_statsSaved = false;
+            m_newBest = false;
+            m_newWorst = false;
             flashRows.clear();
+
+            gameState.gameMode = settings->activeMode;
+            if (gameState.gameMode == GameMode::GarbageClear) {
+                gameState.setupGarbageBoard(settings->garbageRatio);
+                gameState.countdownTimer = 0.f;
+                gameState.fallInterval = 2.0f;
+            } else if (gameState.gameMode == GameMode::GarbageTimeAttack) {
+                gameState.setupGarbageBoard(settings->garbageRatio);
+                gameState.countdownTimer = 240.f;
+            } else if (gameState.gameMode == GameMode::ScoreTimeAttack) {
+                gameState.countdownTimer = settings->scoreTimeLimit;
+                gameState.targetScore = settings->scoreTimeTarget;
+            } else if (gameState.gameMode == GameMode::Ascension) {
+                gameState.countdownTimer = 90.f;
+                gameState.targetScore = 1500;
+            } else if (gameState.gameMode == GameMode::TacticalStep) {
+                gameState.countdownTimer = 0.f;
+            } else if (gameState.gameMode == GameMode::TacticalGarbageClear) {
+                gameState.setupGarbageBoard(settings->garbageRatio);
+                gameState.countdownTimer = 0.f;
+            } else if (gameState.gameMode == GameMode::Custom) {
+                gameState.customSettings = settings->customSettings;
+                if (gameState.customSettings.garbageBoardEnabled) {
+                    gameState.setupGarbageBoard(gameState.customSettings.garbageRatio);
+                } else {
+                    gameState.board.clear();
+                }
+                if (gameState.customSettings.timeLimitEnabled) {
+                    gameState.countdownTimer = gameState.customSettings.timeLimit;
+                } else {
+                    gameState.countdownTimer = 0.f;
+                }
+                if (gameState.customSettings.targetScoreEnabled) {
+                    gameState.targetScore = gameState.customSettings.targetScore;
+                } else {
+                    gameState.targetScore = 0;
+                }
+                if (gameState.customSettings.gravityEnabled) {
+                    gameState.fallInterval = 1.0f;
+                } else {
+                    gameState.fallInterval = 999999.f;
+                }
+            } else { // Classic
+                gameState.countdownTimer = 0.f;
+            }
+
+            gameState.onGameWon = [this]() {
+                showVictory = true;
+                playerName = "";
+                audio.playSound("levelup");
+                audio.stopMusic(2.f);
+                saveStats();
+            };
             
             // Reset particle system
             particleSystem = std::make_unique<engine::ParticleSystem>(registry());
@@ -1253,51 +1528,15 @@ namespace tetris {
         }
 
         void handleGameOverEvent(const sf::Event &event) {
-            if (const auto *key = event.getIf<sf::Event::KeyPressed>()) {
-                if (key->code == sf::Keyboard::Key::Backspace) {
-                    if (!playerName.empty()) playerName.pop_back();
-                } else if (playerName.size() < 3) {
-                    // A'dan Z'ye kadar olan tuşları yakala
-                    int code = static_cast<int>(key->code);
-                    int aCode = static_cast<int>(sf::Keyboard::Key::A);
-                    int zCode = static_cast<int>(sf::Keyboard::Key::Z);
-
-                    if (code >= aCode && code <= zCode) {
-                        playerName += static_cast<char>('A' + (code - aCode));
-                    }
-                }
-            }
-            // (Alternatif) Backspace tuşu
-            else if (const auto *k = event.getIf<sf::Event::KeyPressed>()) {
-                if (k->code == sf::Keyboard::Key::Backspace && !playerName.empty()) {
-                    playerName.pop_back();
-                }
-            }
-
-            // 2. Mouse Tıklamaları
+            // Mouse Tıklamaları
             sf::Vector2f mouse = window.mapPixelToCoords(sf::Mouse::getPosition(window));
             if (const auto *e = event.getIf<sf::Event::MouseButtonPressed>()) {
                 if (e->button == sf::Mouse::Button::Left) {
-                    // KAYDET VE ÇIK
-                    if (btnSaveRect.contains(mouse)) {
-                        if (playerName.empty()) playerName = "UNK";
-                        settings->playerName = playerName; // İsmi hafızada tut
-
-                        // Skoru diske kaydet
-                        auto scores = ScoreManager::load("assets/scores.csv");
-                        ScoreManager::Entry newEntry{
-                            playerName, gameState.score, gameState.level, gameState.linesCleared
-                        };
-                        ScoreManager::addEntry(scores, newEntry);
-                        ScoreManager::save(scores, "assets/scores.csv");
-
-                        m_sceneManager->replace(std::make_unique<MainMenuScene>(window, settings)); // Ana menüye dön
-                    }
                     // TEKRAR OYNA
-                    else if (btnPlayAgainRect.contains(mouse)) {
+                    if (btnPlayAgainRect.contains(mouse)) {
                         restartGame();
                     }
-                    // KAYDETMEDEN ÇIK
+                    // MAIN MENU
                     else if (btnMenuRect.contains(mouse)) {
                         m_sceneManager->replace(std::make_unique<MainMenuScene>(window, settings));
                     }
@@ -1305,12 +1544,12 @@ namespace tetris {
             }
         }
 
-        void renderGameOverScreen(sf::RenderWindow &renderWindow) {
+        void renderEndGameScreen(sf::RenderWindow &renderWindow, const std::string &title, sf::Color titleColor) {
             if (!fontLoaded) return;
 
             // Arka planı karart
             sf::RectangleShape dim({float(WIN_W), float(WIN_H)});
-            dim.setFillColor(sf::Color(0, 0, 0, 220));
+            dim.setFillColor(sf::Color(0, 0, 0, 230));
             renderWindow.draw(dim);
 
             auto drawText = [&](const std::string &str, float x, float y, int size, sf::Color col, bool bold = false) {
@@ -1324,32 +1563,54 @@ namespace tetris {
 
             float cx = WIN_W / 2.f;
 
-            drawText("GAME OVER", cx, 150.f, 48, PALETTES[activePalette].uiAccent, true);
-            drawText("SCORE: " + std::to_string(gameState.score), cx, 240.f, 24, sf::Color::White);
-            drawText(
-                "LEVEL: " + std::to_string(gameState.level) + "    LINES: " + std::to_string(gameState.linesCleared),
-                cx, 280.f, 20, sf::Color(200, 200, 200));
+            // Draw Pulsating Title
+            float timeSec = static_cast<float>(std::clock()) / 1000.f;
+            float pulse = 1.f + 0.05f * std::sin(timeSec * 5.f);
+            sf::Text tTitle(font, title, 50);
+            tTitle.setFillColor(titleColor);
+            tTitle.setStyle(sf::Text::Bold);
+            tTitle.setScale({pulse, pulse});
+            sf::FloatRect bTitle = tTitle.getLocalBounds();
+            tTitle.setOrigin({bTitle.position.x + bTitle.size.x / 2.f, bTitle.position.y + bTitle.size.y / 2.f});
+            tTitle.setPosition({cx, 130.f});
+            renderWindow.draw(tTitle);
 
-            // İsim Giriş Alanı
-            drawText("ENTER INITIALS (A-Z)", cx, 360.f, 16, sf::Color(150, 150, 150));
+            // Mode Name
+            drawText(getModeName(gameState.gameMode), cx, 185.f, 20, sf::Color::Cyan, true);
 
-            sf::RectangleShape nameBox({120.f, 50.f});
-            nameBox.setPosition({cx - 60.f, 390.f});
-            nameBox.setFillColor(sf::Color(30, 30, 40));
-            nameBox.setOutlineThickness(2.f);
-            nameBox.setOutlineColor(PALETTES[activePalette].uiAccent);
-            renderWindow.draw(nameBox);
+            // Record Banner
+            bool isScoreBased = (gameState.gameMode == GameMode::Classic ||
+                                 gameState.gameMode == GameMode::ScoreTimeAttack ||
+                                 gameState.gameMode == GameMode::Ascension ||
+                                 gameState.gameMode == GameMode::TacticalStep);
 
-            // Yanıp sönen imleç efekti
-            std::string displayStr = playerName;
-            if (displayStr.size() < 3 && static_cast<int>(std::time(nullptr) * 2) % 2 == 0) {
-                displayStr += "_";
+            if (m_newBest) {
+                sf::Color goldPulseColor(255, static_cast<std::uint8_t>(200 + 55 * std::sin(timeSec * 6.f)), 0);
+                std::string bestMsg = isScoreBased ? "NEW HIGH SCORE!" : "NEW BEST PERFORMANCE!";
+                drawText(bestMsg, cx, 225.f, 20, goldPulseColor, true);
+            } else if (m_newWorst) {
+                sf::Color redPulseColor(255, static_cast<std::uint8_t>(100 + 50 * std::sin(timeSec * 6.f)), static_cast<std::uint8_t>(100 + 50 * std::sin(timeSec * 6.f)));
+                drawText("NEW WORST PERFORMANCE...", cx, 225.f, 18, redPulseColor, true);
             }
-            drawText(displayStr, cx, 400.f, 24, sf::Color::Yellow, true);
 
+            // Stats Box
+            float boxW = 400.f, boxH = 170.f;
+            float boxY = 270.f;
+            sf::RectangleShape statsBox({boxW, boxH});
+            statsBox.setPosition({cx - boxW / 2.f, boxY});
+            statsBox.setFillColor(sf::Color(15, 15, 25, 230));
+            statsBox.setOutlineColor(PALETTES[activePalette].panelBorder);
+            statsBox.setOutlineThickness(1.5f);
+            renderWindow.draw(statsBox);
+
+            drawText("CURRENT PERFORMANCE: " + m_performanceStr, cx, boxY + 15.f, 15, sf::Color::White, true);
+            drawText("BEST RECORD: " + m_prevBestStr, cx, boxY + 50.f, 15, sf::Color(100, 255, 100));
+            drawText("WORST RECORD: " + m_prevWorstStr, cx, boxY + 85.f, 15, sf::Color(255, 100, 100));
+            drawText("GAMES PLAYED: " + std::to_string(m_playCount), cx, boxY + 125.f, 14, sf::Color(160, 160, 160));
+
+            // Buttons
             sf::Vector2f mouse = window.mapPixelToCoords(sf::Mouse::getPosition(window));
 
-            // Buton Çizici Yardımcı
             auto drawBtn = [&](sf::FloatRect &rect, float y, const std::string &text, sf::Color baseCol) {
                 rect = sf::FloatRect({cx - 120.f, y}, {240.f, 40.f});
                 bool hover = rect.contains(mouse);
@@ -1357,16 +1618,327 @@ namespace tetris {
                 sf::RectangleShape rs(rect.size);
                 rs.setPosition(rect.position);
                 rs.setFillColor(hover ? baseCol : sf::Color(baseCol.r / 2, baseCol.g / 2, baseCol.b / 2));
-                rs.setOutlineThickness(2.f);
+                rs.setOutlineThickness(1.5f);
                 rs.setOutlineColor(sf::Color::White);
                 renderWindow.draw(rs);
 
-                drawText(text, cx, y + 8.f, 18, sf::Color::White, true);
+                drawText(text, cx, y + 8.f, 16, sf::Color::White, true);
             };
 
-            drawBtn(btnSaveRect, 480.f, "SAVE & MENU", sf::Color(40, 150, 40));
-            drawBtn(btnPlayAgainRect, 540.f, "PLAY AGAIN", sf::Color(150, 100, 40));
-            drawBtn(btnMenuRect, 600.f, "MENU (NO SAVE)", sf::Color(150, 40, 40));
+            drawBtn(btnPlayAgainRect, 470.f, "PLAY AGAIN", sf::Color(150, 100, 40));
+            drawBtn(btnMenuRect, 530.f, "MAIN MENU", sf::Color(80, 80, 100));
+        }
+
+        void renderGameOverScreen(sf::RenderWindow &renderWindow) {
+            renderEndGameScreen(renderWindow, "GAME OVER", PALETTES[activePalette].uiAccent);
+        }
+
+        void renderAscensionModal(sf::RenderWindow &renderWindow) {
+            // 1. Fullscreen dark dim overlay
+            sf::RectangleShape dim(sf::Vector2f{float(WIN_W), float(WIN_H)});
+            dim.setFillColor(sf::Color(0, 0, 0, 205));
+            renderWindow.draw(dim);
+
+            if (!fontLoaded) return;
+
+            // Header Texts
+            sf::Text title(font, "CHOOSE AN ASCENSION POWER!", 22);
+            title.setFillColor(sf::Color(255, 215, 0));
+            title.setStyle(sf::Text::Bold);
+            sf::FloatRect bTitle = title.getLocalBounds();
+            title.setOrigin({bTitle.position.x + bTitle.size.x / 2.f, bTitle.position.y + bTitle.size.y / 2.f});
+            title.setPosition({WIN_W * 0.5f, 100.f});
+            renderWindow.draw(title);
+
+            sf::Text subtitle(font, "Target score reached! Choose a power to extend time.", 13);
+            subtitle.setFillColor(sf::Color(200, 200, 220));
+            sf::FloatRect bSub = subtitle.getLocalBounds();
+            subtitle.setOrigin({bSub.position.x + bSub.size.x / 2.f, bSub.position.y + bSub.size.y / 2.f});
+            subtitle.setPosition({WIN_W * 0.5f, 135.f});
+            renderWindow.draw(subtitle);
+
+            // Draw 3 cards side-by-side
+            float cardW = 160.f, cardH = 250.f;
+            float startY = 220.f;
+            sf::Vector2f mouse = sf::Vector2f(sf::Mouse::getPosition(window));
+            mouse = window.mapPixelToCoords(sf::Mouse::getPosition(window));
+
+            float timeSec = static_cast<float>(std::clock()) / 1000.f;
+
+            for (int i = 0; i < 3; ++i) {
+                float cardX = 55.f + i * (cardW + 55.f);
+                ascensionCardRects[i] = sf::FloatRect({cardX, startY}, {cardW, cardH});
+
+                bool hovered = ascensionCardRects[i].contains(mouse);
+
+                PowerType p = ascensionChoices[i];
+                PowerSlot dummySlot;
+                dummySlot.type = p;
+
+                sf::Color pColor = dummySlot.color();
+
+                // Pulse glow for hovered card
+                float scale = hovered ? 1.05f : 1.0f;
+                float tiltAngle = std::sin(timeSec * 3.f + i * 1.5f) * 1.5f;
+
+                sf::Transform transform;
+                transform.translate({cardX + cardW * 0.5f, startY + cardH * 0.5f});
+                transform.rotate(sf::degrees(tiltAngle));
+                transform.scale({scale, scale});
+
+                // Neon Outer Glow for hovered card
+                if (hovered) {
+                    float pulse = 0.5f + 0.5f * std::sin(timeSec * 8.f);
+                    for (int j = 0; j < 3; ++j) {
+                        sf::RectangleShape glowBox(sf::Vector2f{cardW + j * 4.f, cardH + j * 4.f});
+                        glowBox.setOrigin(glowBox.getSize() * 0.5f);
+                        glowBox.setFillColor(sf::Color::Transparent);
+                        sf::Color gc = pColor;
+                        gc.a = static_cast<std::uint8_t>((50 - j * 15) * (0.8f + 0.2f * pulse));
+                        glowBox.setOutlineColor(gc);
+                        glowBox.setOutlineThickness(1.5f);
+                        renderWindow.draw(glowBox, transform);
+                    }
+                }
+
+                // Card body
+                sf::RectangleShape card(sf::Vector2f{cardW, cardH});
+                card.setOrigin(card.getSize() * 0.5f);
+                card.setFillColor(sf::Color(15, 15, 26, 245));
+                card.setOutlineColor(hovered ? pColor : sf::Color(80, 80, 100));
+                card.setOutlineThickness(hovered ? 3.f : 1.5f);
+                renderWindow.draw(card, transform);
+
+                // Draw a colored top bar inside the card
+                sf::RectangleShape topBar({cardW - 16.f, 6.f});
+                topBar.setOrigin(topBar.getSize() * 0.5f);
+                topBar.setPosition({0.f, -cardH * 0.5f + 16.f});
+                topBar.setFillColor(pColor);
+                renderWindow.draw(topBar, transform);
+
+                // Power Name
+                sf::Text nameTxt(font, dummySlot.name(), 12);
+                nameTxt.setFillColor(pColor);
+                nameTxt.setStyle(sf::Text::Bold);
+                sf::FloatRect bName = nameTxt.getLocalBounds();
+                nameTxt.setOrigin({bName.position.x + bName.size.x / 2.f, bName.position.y + bName.size.y / 2.f});
+                nameTxt.setPosition({0.f, -cardH * 0.5f + 40.f});
+                renderWindow.draw(nameTxt, transform);
+
+                // Power Description
+                sf::Text descTxt(font, dummySlot.description(), 9);
+                descTxt.setFillColor(sf::Color(200, 200, 220));
+                sf::FloatRect bDesc = descTxt.getLocalBounds();
+                descTxt.setOrigin({bDesc.position.x + bDesc.size.x / 2.f, bDesc.position.y + bDesc.size.y / 2.f});
+                descTxt.setPosition({0.f, 20.f});
+                renderWindow.draw(descTxt, transform);
+
+                // Draw small icon/shape seal in card center
+                float sealRadius = 25.f;
+                sf::CircleShape seal(sealRadius);
+                seal.setOrigin({sealRadius, sealRadius});
+                seal.setPosition({0.f, -30.f});
+                seal.setFillColor(sf::Color(pColor.r / 6, pColor.g / 6, pColor.b / 6, 120));
+                seal.setOutlineColor(sf::Color(pColor.r, pColor.g, pColor.b, 80));
+                seal.setOutlineThickness(1.f);
+                renderWindow.draw(seal, transform);
+
+                // Draw miniature block in the center
+                TetrominoType drawType = TetrominoType::COUNT;
+                switch (p) {
+                    case PowerType::I_Small:
+                    case PowerType::I_Big: drawType = TetrominoType::I; break;
+                    case PowerType::O_Small:
+                    case PowerType::O_Big: drawType = TetrominoType::O; break;
+                    case PowerType::T_Big: drawType = TetrominoType::T; break;
+                    case PowerType::L_Small:
+                    case PowerType::L_Big: drawType = TetrominoType::L; break;
+                    case PowerType::J_Small:
+                    case PowerType::J_Big: drawType = TetrominoType::J; break;
+                    case PowerType::S_Small:
+                    case PowerType::S_Big: drawType = TetrominoType::S; break;
+                    case PowerType::Z_Small:
+                    case PowerType::Z_Big: drawType = TetrominoType::Z; break;
+                    case PowerType::SZ_Special: drawType = TetrominoType::S; break;
+                    default: break;
+                }
+
+                if (drawType != TetrominoType::COUNT) {
+                    Piece pic; pic.type = drawType; pic.rotation = 0;
+                    float bSize = 10.f;
+                    float sumC = 0.f, sumR = 0.f;
+                    auto cells = pic.localCells();
+                    for (auto [r, c] : cells) { sumC += c; sumR += r; }
+                    sf::Vector2f tCenter(sumC / cells.size(), sumR / cells.size());
+                    
+                    sf::RectangleShape previewCell(sf::Vector2f{bSize - 1.f, bSize - 1.f});
+                    previewCell.setOrigin({(bSize - 1.f) * 0.5f, (bSize - 1.f) * 0.5f});
+                    previewCell.setFillColor(pColor);
+                    
+                    for (auto [r, c] : cells) {
+                        previewCell.setPosition({(c - tCenter.x) * bSize, -30.f + (r - tCenter.y) * bSize});
+                        renderWindow.draw(previewCell, transform);
+                    }
+                } else if (p == PowerType::ExtraTime) {
+                    sf::Text timeSym(font, "+45s", 18);
+                    timeSym.setFillColor(pColor);
+                    timeSym.setStyle(sf::Text::Bold);
+                    sf::FloatRect bSym = timeSym.getLocalBounds();
+                    timeSym.setOrigin({bSym.position.x + bSym.size.x / 2.f, bSym.position.y + bSym.size.y / 2.f});
+                    timeSym.setPosition({0.f, -30.f});
+                    renderWindow.draw(timeSym, transform);
+                }
+            }
+        }
+
+        void renderVictoryScreen(sf::RenderWindow &renderWindow) {
+            renderEndGameScreen(renderWindow, "VICTORY!", sf::Color(255, 215, 0));
+        }
+
+        void openAscensionModal() {
+            showAscensionModal = true;
+            gameState.freezeFalling(true);
+            
+            std::vector<PowerType> allPowers;
+            // Add all available power types (up to ExtraTime, which is 14)
+            for (int i = 0; i <= 14; ++i) {
+                allPowers.push_back(static_cast<PowerType>(i));
+            }
+            // Shuffle to get 3 random distinct ones
+            std::shuffle(allPowers.begin(), allPowers.end(), std::mt19937(std::random_device{}()));
+            
+            ascensionChoices[0] = allPowers[0];
+            ascensionChoices[1] = allPowers[1];
+            ascensionChoices[2] = allPowers[2];
+        }
+
+        void saveStats() {
+            if (m_statsSaved) return;
+            m_statsSaved = true;
+
+            int currentVal = 0;
+            bool isScoreBased = (gameState.gameMode == GameMode::Classic ||
+                                 gameState.gameMode == GameMode::ScoreTimeAttack ||
+                                 gameState.gameMode == GameMode::Ascension ||
+                                 gameState.gameMode == GameMode::TacticalStep ||
+                                 gameState.gameMode == GameMode::Custom);
+
+            if (gameState.gameMode == GameMode::Classic || gameState.gameMode == GameMode::Ascension || gameState.gameMode == GameMode::TacticalStep || gameState.gameMode == GameMode::Custom) {
+                currentVal = gameState.score;
+            } else if (gameState.gameMode == GameMode::ScoreTimeAttack) {
+                if (gameState.gameWon) {
+                    currentVal = 10000 + static_cast<int>(gameState.countdownTimer * 10.f);
+                } else {
+                    currentVal = gameState.score;
+                }
+            } else if (gameState.gameMode == GameMode::TacticalGarbageClear || gameState.gameMode == GameMode::GarbageClear) {
+                if (gameState.gameWon) {
+                    currentVal = static_cast<int>(gameState.countdownTimer);
+                } else {
+                    int remainingBlocks = 0;
+                    if (gameState.gameMode == GameMode::TacticalGarbageClear) {
+                        remainingBlocks = gameState.board.countOriginalGarbage();
+                    } else {
+                        for (int r = 0; r < BOARD_ROWS; ++r) {
+                            for (int c = 0; c < BOARD_COLS; ++c) {
+                                if (!gameState.board.isEmpty(c, r)) {
+                                    remainingBlocks++;
+                                }
+                            }
+                        }
+                    }
+                    currentVal = 5000 + remainingBlocks;
+                }
+            } else { // GarbageTimeAttack
+                if (gameState.gameWon) {
+                    currentVal = static_cast<int>(240.f - gameState.countdownTimer);
+                } else {
+                    int remainingBlocks = 0;
+                    for (int r = 0; r < BOARD_ROWS; ++r) {
+                        for (int c = 0; c < BOARD_COLS; ++c) {
+                            if (!gameState.board.isEmpty(c, r)) {
+                                remainingBlocks++;
+                            }
+                        }
+                    }
+                    currentVal = 5000 + remainingBlocks;
+                }
+            }
+
+            auto stats = StatsManager::load("assets/stats.csv");
+            auto& modeStats = stats[gameState.gameMode];
+
+            int oldBest = -1;
+            int oldWorst = -1;
+            if (modeStats.playCount > 0 && !modeStats.history.empty()) {
+                oldBest = modeStats.history[0];
+                oldWorst = modeStats.history[0];
+                for (int val : modeStats.history) {
+                    if (isScoreBased) {
+                        if (val > oldBest) oldBest = val;
+                        if (val < oldWorst) oldWorst = val;
+                    } else {
+                        if (val < oldBest) oldBest = val;
+                        if (val > oldWorst) oldWorst = val;
+                    }
+                }
+            }
+
+            // Determine if new best or new worst
+            if (modeStats.playCount == 0) {
+                m_newBest = true;
+                m_newWorst = false;
+            } else {
+                if (isScoreBased) {
+                    if (currentVal > oldBest) m_newBest = true;
+                    if (currentVal < oldWorst) m_newWorst = true;
+                } else {
+                    if (currentVal < oldBest) m_newBest = true;
+                    if (currentVal > oldWorst) m_newWorst = true;
+                }
+            }
+
+            // Record old values for end screen display
+            if (modeStats.playCount > 0) {
+                m_prevBestStr = StatsManager::formatValue(gameState.gameMode, oldBest);
+                m_prevWorstStr = StatsManager::formatValue(gameState.gameMode, oldWorst);
+            } else {
+                m_prevBestStr = "N/A";
+                m_prevWorstStr = "N/A";
+            }
+
+            // Add new record and save
+            StatsManager::addRecord(stats, gameState.gameMode, currentVal);
+            StatsManager::save(stats, "assets/stats.csv");
+
+            m_playCount = stats[gameState.gameMode].playCount;
+            m_performanceStr = StatsManager::formatValue(gameState.gameMode, currentVal);
+        }
+ 
+        void chooseAscensionPower(int index) {
+            PowerType chosen = ascensionChoices[index];
+            
+            if (chosen == PowerType::ExtraTime) {
+                gameState.countdownTimer = 135.f;
+                audio.playSound("token");
+                spawnFloatingText({BOARD_X + BOARD_PIXEL_W * 0.5f, BOARD_Y + BOARD_PIXEL_H * 0.3f}, "+45 SECONDS!", sf::Color::Magenta);
+            } else {
+                gameState.slotMachine.awardPower(chosen);
+                gameState.countdownTimer = 90.f;
+                audio.playSound("token");
+                spawnFloatingText({BOARD_X + BOARD_PIXEL_W * 0.5f, BOARD_Y + BOARD_PIXEL_H * 0.3f}, "POWER ACQUIRED!", sf::Color::Green);
+            }
+            
+            // Increase target score progressively
+            int increment = 1500 + 500 * gameState.level * gameState.level;
+            gameState.targetScore += increment;
+            
+            // Increment level
+            gameState.level += 1;
+            gameState.recalcLevel();
+            
+            showAscensionModal = false;
+            gameState.freezeFalling(false);
         }
 
         void applyPalette(int index) {
@@ -1442,12 +2014,26 @@ namespace tetris {
 
         // Game Over / Score State
         std::string playerName{"AAA"};
-        sf::FloatRect btnSaveRect;
         sf::FloatRect btnPlayAgainRect;
         sf::FloatRect btnMenuRect;
+
+        // Auto-save & stats display states
+        bool m_statsSaved{false};
+        bool m_newBest{false};
+        bool m_newWorst{false};
+        std::string m_performanceStr;
+        std::string m_prevBestStr;
+        std::string m_prevWorstStr;
+        int m_playCount{0};
 
         // Mouse Tilt Parallax juice
         sf::Vector2f m_mouseTilt{0.f, 0.f};
         float m_tiltRotation{0.f};
+
+        // Game Mode Overlays
+        bool showVictory{false};
+        bool showAscensionModal{false};
+        std::array<PowerType, 3> ascensionChoices;
+        std::array<sf::FloatRect, 3> ascensionCardRects;
     };
 } // namespace tetris
